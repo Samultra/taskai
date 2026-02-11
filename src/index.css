@@ -1,0 +1,157 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* AI Task Planner Design System - Modern, intelligent, beautiful */
+
+@layer base {
+  :root {
+    /* Base colors - soft modern palette */
+    --background: 250 50% 98%;
+    --foreground: 230 15% 15%;
+
+    /* Card system - elegant glass effect */
+    --card: 0 0% 100%;
+    --card-foreground: 230 15% 15%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 230 15% 15%;
+
+    /* AI-themed primary colors - intelligent purple-blue */
+    --primary: 250 85% 60%;
+    --primary-foreground: 0 0% 98%;
+    --primary-glow: 250 100% 75%;
+
+    /* Secondary - calm productive tones */
+    --secondary: 240 20% 96%;
+    --secondary-foreground: 230 15% 25%;
+
+    /* Muted - subtle backgrounds */
+    --muted: 240 20% 96%;
+    --muted-foreground: 230 10% 50%;
+
+    /* Accent - energetic highlights */
+    --accent: 280 100% 70%;
+    --accent-foreground: 0 0% 98%;
+
+    /* Task status colors */
+    --success: 142 76% 36%;
+    --success-foreground: 0 0% 98%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 15%;
+    
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 98%;
+
+    /* Borders and inputs - subtle but defined */
+    --border: 240 20% 90%;
+    --input: 240 20% 94%;
+    --ring: 250 85% 60%;
+
+    /* Gradients for modern AI feel */
+    --gradient-ai: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--accent)));
+    --gradient-card: linear-gradient(145deg, rgba(255,255,255,0.8), rgba(255,255,255,0.4));
+    --gradient-bg: radial-gradient(ellipse at top, hsl(250 100% 98%), hsl(var(--background)));
+
+    /* Shadows for depth */
+    --shadow-card: 0 4px 16px -2px hsl(250 50% 20% / 0.08);
+    --shadow-floating: 0 8px 32px -4px hsl(250 50% 20% / 0.12);
+    --shadow-glow: 0 0 40px hsl(var(--primary) / 0.15);
+
+    /* Animation values */
+    --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-bounce: all 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+
+    /* Border radius - modern rounded corners */
+    --radius: 12px;
+
+    /* Chat-specific styles */
+    --chat-bg: 255 255 255 / 0.95;
+    --chat-border: 250 50% 95%;
+  }
+
+  .dark {
+    /* Dark mode AI colors - deeper, more mysterious */
+    --background: 230 25% 8%;
+    --foreground: 250 50% 95%;
+
+    --card: 230 25% 12%;
+    --card-foreground: 250 50% 95%;
+
+    --primary: 250 85% 65%;
+    --primary-glow: 250 100% 80%;
+    
+    --secondary: 230 20% 15%;
+    --secondary-foreground: 250 30% 85%;
+
+    --muted: 230 20% 15%;
+    --muted-foreground: 230 15% 65%;
+
+    --accent: 280 100% 75%;
+    
+    --border: 230 20% 20%;
+    --input: 230 20% 18%;
+    
+    --shadow-card: 0 4px 16px -2px hsl(230 50% 5% / 0.3);
+    --shadow-floating: 0 8px 32px -4px hsl(230 50% 5% / 0.4);
+    --shadow-glow: 0 0 40px hsl(var(--primary) / 0.25);
+
+    --chat-bg: 230 25% 12% / 0.95;
+    --chat-border: 230 20% 20%;
+
+    --sidebar-background: 240 5.9% 10%;
+    --sidebar-foreground: 240 4.8% 95.9%;
+    --sidebar-primary: 224.3 76.3% 48%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 240 3.7% 15.9%;
+    --sidebar-accent-foreground: 240 4.8% 95.9%;
+    --sidebar-border: 240 3.7% 15.9%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-gradient-radial text-foreground min-h-screen;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  }
+
+  /* Custom animations and utilities */
+  .animate-fade-in {
+    animation: fadeIn 0.5s ease-out;
+  }
+
+  .animate-slide-up {
+    animation: slideUp 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.33);
+  }
+
+  .glass-effect {
+    backdrop-filter: blur(12px);
+    background: var(--gradient-card);
+    border: 1px solid hsl(var(--border) / 0.5);
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  @keyframes slideUp {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Chat animations */
+  .chat-slide-in {
+    animation: chatSlideIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  @keyframes chatSlideIn {
+    from { transform: translateX(100%); }
+    to { transform: translateX(0); }
+  }
+}

@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TaskAI</title>
+    <meta name="description" content="TaskAI — ИИ-помощник для эффективного планирования дел, напоминаний и советов по тайм-менеджменту." />
+    <meta name="author" content="TaskAI" />
+    <meta name="keywords" content="планировщик дел, ИИ помощник, тайм-менеджмент, задачи, напоминания, продуктивность" />
+
+    <script>
+      window.__BASE_URL__ = (function(){
+        var b = document.currentScript && document.currentScript.src;
+        try { return new URL('.', b).pathname; } catch (_) { return '/task-sage-sidekick/'; }
+      })();
+    </script>
+
+    <link rel="icon" id="favicon" sizes="any" />
+    <link rel="apple-touch-icon" id="appleicon" />
+    <link rel="shortcut icon" id="shorticon" />
+
+    <meta property="og:title" content="TaskAI" />
+    <meta property="og:description" content="ИИ-помощник для планирования дел и тайм-менеджмента" />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="/taskAI.png?v=1" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="TaskAI" />
+    <meta name="twitter:description" content="ИИ-помощник для планирования дел и тайм-менеджмента" />
+    <meta name="twitter:image" content="/taskAI.png?v=1" />
+
+    <script>
+      (function(){
+        var base = (window.__BASE_URL__ || '/task-sage-sidekick/');
+        document.getElementById('favicon').href = base + 'taskAI.png?v=6';
+        document.getElementById('appleicon').href = base + 'taskAI.png?v=6';
+        document.getElementById('shorticon').href = base + 'taskAI.png?v=6';
+      })();
+    </script>
+  </head>
+
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
