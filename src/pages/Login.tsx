@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate, Link } from "react-router-dom";
 import { Card } from "@/components/ui/card";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -23,6 +24,7 @@ const Login = () => {
     password: "",
   });
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     // Если пользователь уже вошёл — не показываем форму, а перекидываем в нужный кабинет
@@ -36,11 +38,13 @@ const Login = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.email || !form.password) return;
+    setError(null);
     setLoading(true);
     const res = await signIn(form.email, form.password);
     setLoading(false);
 
     if (res.error) {
+      setError(res.error);
       toast({
         title: "Ошибка входа",
         description: res.error,
@@ -76,6 +80,11 @@ const Login = () => {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
+          {error && (
+            <Alert variant="destructive">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
           <div className="space-y-2">
             <Label htmlFor="email">Email</Label>
             <Input
@@ -100,7 +109,11 @@ const Login = () => {
             />
           </div>
 
-          <Button type="submit" className="w-full bg-gradient-ai hover:shadow-glow" disabled={loading}>
+          <Button
+            type="submit"
+            className="w-full bg-gradient-ai hover:shadow-glow"
+            disabled={loading}
+          >
             {loading ? "Входим..." : "Войти"}
           </Button>
         </form>

@@ -11,7 +11,7 @@
     <script>
       window.__BASE_URL__ = (function(){
         var b = document.currentScript && document.currentScript.src;
-        try { return new URL('.', b).pathname; } catch (_) { return '/task-sage-sidekick/'; }
+        try { return new URL('.', b).pathname; } catch (_) { return '/taskai/'; }
       })();
     </script>
 
@@ -22,16 +22,16 @@
     <meta property="og:title" content="TaskAI" />
     <meta property="og:description" content="ИИ-помощник для планирования дел и тайм-менеджмента" />
     <meta property="og:type" content="website" />
-    <meta property="og:image" content="/taskAI.png?v=1" />
+    <meta property="og:image" content="taskAI.png?v=1" />
 
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="TaskAI" />
     <meta name="twitter:description" content="ИИ-помощник для планирования дел и тайм-менеджмента" />
-    <meta name="twitter:image" content="/taskAI.png?v=1" />
+    <meta name="twitter:image" content="taskAI.png?v=1" />
 
     <script>
       (function(){
-        var base = (window.__BASE_URL__ || '/task-sage-sidekick/');
+        var base = (window.__BASE_URL__ || '/taskai/');
         document.getElementById('favicon').href = base + 'taskAI.png?v=6';
         document.getElementById('appleicon').href = base + 'taskAI.png?v=6';
         document.getElementById('shorticon').href = base + 'taskAI.png?v=6';
@@ -41,6 +41,16 @@
 
   <body>
     <div id="root"></div>
+    <script>
+      // Обработка редиректа с 404.html для GitHub Pages
+      (function() {
+        var redirect = sessionStorage.redirect;
+        delete sessionStorage.redirect;
+        if (redirect && redirect !== location.pathname) {
+          history.replaceState(null, null, redirect);
+        }
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

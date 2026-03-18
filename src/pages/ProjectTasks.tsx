@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
-import { supabase } from "@/lib/supabase";
+import { apiProjectDetail, apiProjectCreateTask, apiProjectUpdateTask, apiProjectDeleteTask } from "@/lib/api";
 import { Calendar, Plus, ArrowLeft } from "lucide-react";
 
 type TaskStatus = "todo" | "in_progress" | "done" | "blocked";
@@ -75,18 +75,13 @@ const ProjectTasks = () => {
     const load = async () => {
       setLoading(true);
       try {
-        const [{ data: proj, error: projErr }, { data: usersRows, error: usersErr }] =
-          await Promise.all([
-            supabase
-              .from("projects")
-              .select("id, name, code, color, owner_profile_id")
-              .eq("id", numericProjectId)
-              .maybeSingle(),
-            supabase.from("profiles").select("id, email").order("email", { ascending: true }),
-          ]);
+        const detail = await apiProjectDetail(numericProjectId);
+        const proj = detail.project;
+        const usersRows = detail.users;
+        const taskRows = detail.tasks;
 
-        if (projErr || !proj) {
-          console.error(projErr);
+        if (!proj) {
+          console.error("Project not found");
           toast({
             title: "Проект не найден",
             description: "Вернитесь в список проектов",
@@ -103,63 +98,31 @@ const ProjectTasks = () => {
           owner_profile_id: (proj as any).owner_profile_id ?? null,
         });
 
-        if (usersErr) {
-          console.error(usersErr);
-        } else {
-          setUsers((usersRows ?? []) as { id: string; email: string }[]);
-        }
+        setUsers((usersRows ?? []) as { id: string; email: string }[]);
 
         // Проверка доступа к проекту
-        const isAdmin = profile?.role === "admin";
-        const isModerator = profile?.role === "moderator";
-        const isOwner = !!profile?.id && (proj as any).owner_profile_id === profile.id;
+        setCanAccess(true);
 
-        let allowed = false;
-        if (isAdmin) allowed = true;
-        else if ((isModerator || profile?.role === "user") && profile?.id) {
-          const { data: membership, error: memErr } = await supabase
-            .from("project_members")
-            .select("project_id")
-            .eq("project_id", numericProjectId)
-            .eq("profile_id", profile.id)
-            .maybeSingle();
-          if (memErr) console.error(memErr);
-          allowed = Boolean(membership) || isOwner;
-        }
-        setCanAccess(allowed);
-
-        if (!allowed) {
-          setTasks([]);
-          return;
-        }
-
-        // Загрузка задач проекта (после проверки доступа)
-        const { data: taskRows, error: taskErr } = await supabase
-          .from("tasks")
-          .select(
-            "id, title, description, task_type, complexity, status, priority, due_date, assignee_profile_id, profiles!tasks_assignee_profile_id_fkey(email)"
-          )
-          .eq("project_id", numericProjectId)
-          .order("due_date", { ascending: true });
-
-        if (taskErr) {
-          console.error(taskErr);
-          toast({ title: "Ошибка загрузки задач проекта", description: taskErr.message, variant: "destructive" });
-        } else {
-          const mapped: ProjectTask[] = (taskRows ?? []).map((t: any) => ({
-            id: t.id,
-            title: t.title,
-            description: t.description,
-            task_type: t.task_type,
-            complexity: t.complexity,
-            status: (t.status as TaskStatus) ?? "todo",
-            priority: (t.priority ?? "medium") as "low" | "medium" | "high",
-            due_date: t.due_date,
-            assignee_profile_id: t.assignee_profile_id,
-            assignee_email: t.profiles?.email ?? null,
-          }));
-          setTasks(mapped);
-        }
+        const mapped: ProjectTask[] = (taskRows ?? []).map((t: any) => ({
+          id: t.id,
+          title: t.title,
+          description: t.description,
+          task_type: t.task_type,
+          complexity: t.complexity,
+          status: (t.status as TaskStatus) ?? "todo",
+          priority: (t.priority ?? "medium") as "low" | "medium" | "high",
+          due_date: t.due_date,
+          assignee_profile_id: t.assignee_profile_id,
+          assignee_email: t.assignee_email ?? null,
+        }));
+        setTasks(mapped);
+      } catch (e: any) {
+        toast({
+          title: "Ошибка загрузки проекта",
+          description: e?.message ?? "Не удалось загрузить проект. Проверьте доступ.",
+          variant: "destructive",
+        });
+        setCanAccess(false);
       } finally {
         setLoading(false);
       }
@@ -177,66 +140,55 @@ const ProjectTasks = () => {
     e.preventDefault();
     if (!newTask.title.trim() || Number.isNaN(numericProjectId)) return;
 
-    const payload: any = {
-      project_id: numericProjectId,
-      title: newTask.title.trim(),
-      description: newTask.description.trim() || null,
-      task_type: newTask.task_type,
-      complexity: newTask.complexity,
-      status: newTask.status,
-      priority: newTask.priority,
-      due_date: newTask.due_date ? new Date(newTask.due_date).toISOString() : null,
-      assignee_profile_id: newTask.assignee_profile_id || null,
-      completed: newTask.status === "done",
-      category: "Проект",
-    };
+    try {
+      const payload: any = {
+        title: newTask.title.trim(),
+        description: newTask.description.trim() || null,
+        task_type: newTask.task_type,
+        complexity: newTask.complexity,
+        status: newTask.status,
+        priority: newTask.priority,
+        due_date: newTask.due_date ? new Date(newTask.due_date).toISOString() : null,
+        assignee_profile_id: newTask.assignee_profile_id || null,
+      };
 
-    const { data, error } = await supabase
-      .from("tasks")
-      .insert(payload)
-      .select(
-        "id, title, description, task_type, complexity, status, priority, due_date, assignee_profile_id, profiles!tasks_assignee_profile_id_fkey(email)"
-      )
-      .single();
+      const data = await apiProjectCreateTask(numericProjectId, payload);
 
-    if (error) {
-      toast({ title: "Не удалось создать задачу", description: error.message, variant: "destructive" });
-      return;
+      const created: ProjectTask = {
+        id: data.id,
+        title: data.title,
+        description: data.description,
+        task_type: data.task_type,
+        complexity: data.complexity,
+        status: (data.status as TaskStatus) ?? "todo",
+        priority: (data.priority ?? "medium") as "low" | "medium" | "high",
+        due_date: data.due_date,
+        assignee_profile_id: data.assignee_profile_id,
+        assignee_email: data.assignee_email ?? null,
+      };
+
+      setTasks((prev) => [...prev, created]);
+      setNewTask({
+        title: "",
+        description: "",
+        task_type: "feature",
+        complexity: "M",
+        priority: "medium",
+        status: "todo",
+        due_date: "",
+        assignee_profile_id: "",
+      });
+
+      toast({ title: "Задача создана" });
+    } catch (error: any) {
+      toast({ title: "Не удалось создать задачу", description: error?.message ?? "Ошибка сервера", variant: "destructive" });
     }
-
-    const created: ProjectTask = {
-      id: data.id,
-      title: data.title,
-      description: data.description,
-      task_type: data.task_type,
-      complexity: data.complexity,
-      status: (data.status as TaskStatus) ?? "todo",
-      priority: (data.priority ?? "medium") as "low" | "medium" | "high",
-      due_date: data.due_date,
-      assignee_profile_id: data.assignee_profile_id,
-      assignee_email: data.profiles?.email ?? null,
-    };
-
-    setTasks((prev) => [...prev, created]);
-    setNewTask({
-      title: "",
-      description: "",
-      task_type: "feature",
-      complexity: "M",
-      priority: "medium",
-      status: "todo",
-      due_date: "",
-      assignee_profile_id: "",
-    });
-
-    toast({ title: "Задача создана" });
   };
 
   const updateTask = async (id: number, updates: Partial<ProjectTask>) => {
     const payload: any = {};
     if (updates.status) {
       payload.status = updates.status;
-      payload.completed = updates.status === "done";
     }
     if (updates.assignee_profile_id !== undefined) {
       payload.assignee_profile_id = updates.assignee_profile_id || null;
@@ -247,32 +199,34 @@ const ProjectTasks = () => {
 
     if (Object.keys(payload).length === 0) return;
 
-    const { error } = await supabase.from("tasks").update(payload).eq("id", id);
-    if (error) {
-      toast({ title: "Ошибка обновления задачи", description: error.message, variant: "destructive" });
-      return;
+    try {
+      const data = await apiProjectUpdateTask(id, payload);
+      const merged: ProjectTask = {
+        id: data.id,
+        title: data.title,
+        description: data.description,
+        task_type: data.task_type,
+        complexity: data.complexity,
+        status: (data.status as TaskStatus) ?? "todo",
+        priority: (data.priority ?? "medium") as "low" | "medium" | "high",
+        due_date: data.due_date,
+        assignee_profile_id: data.assignee_profile_id,
+        assignee_email: data.assignee_email ?? null,
+      };
+      setTasks((prev) => prev.map((t) => (t.id === id ? merged : t)));
+    } catch (error: any) {
+      toast({ title: "Ошибка обновления задачи", description: error?.message ?? "Не удалось обновить задачу", variant: "destructive" });
     }
-
-    setTasks((prev) =>
-      prev.map((t) =>
-        t.id === id
-          ? {
-              ...t,
-              ...updates,
-            }
-          : t
-      )
-    );
   };
 
   const deleteTask = async (id: number) => {
-    const { error } = await supabase.from("tasks").delete().eq("id", id);
-    if (error) {
-      toast({ title: "Ошибка удаления задачи", description: error.message, variant: "destructive" });
-      return;
+    try {
+      await apiProjectDeleteTask(id);
+      setTasks((prev) => prev.filter((t) => t.id !== id));
+      toast({ title: "Задача удалена" });
+    } catch (error: any) {
+      toast({ title: "Ошибка удаления задачи", description: error?.message ?? "Не удалось удалить задачу", variant: "destructive" });
     }
-    setTasks((prev) => prev.filter((t) => t.id !== id));
-    toast({ title: "Задача удалена" });
   };
 
   if (!projectId || Number.isNaN(numericProjectId)) {

@@ -1,15 +1,16 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Brain, Calendar, CheckCircle2, Clock, Filter, MessageSquare, Sparkles, Star, Bell, BellOff } from "lucide-react";
+import { Brain, Calendar, CheckCircle2, Clock, MessageSquare, Sparkles, Star, Bell, BellOff, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import TaskCard, { Task } from "@/components/TaskCard";
 import TaskForm from "@/components/TaskForm";
 import AIChat from "@/components/AIChat";
 import { useToast } from "@/hooks/use-toast";
-import { supabase } from "@/lib/supabase";
+import { apiCreateTask, apiDeleteTask, apiGetTasks, apiUpdateTask, apiGetDepartmentsWithMembers, apiRequestJoinDepartment } from "@/lib/api";
 import { registerServiceWorker, requestPermission, startTipsScheduler, stopTipsScheduler, showNotification } from "@/lib/notifications";
 import { useAuth } from "@/hooks/useAuth";
 
@@ -19,6 +20,9 @@ const Index = () => {
   const [filter, setFilter] = useState<"all" | "pending" | "completed">("all");
   const [taskScope, setTaskScope] = useState<"personal" | "team">("personal");
   const [tipsEnabled, setTipsEnabled] = useState(false);
+  const [departments, setDepartments] = useState<any[]>([]);
+  const [joiningDeptId, setJoiningDeptId] = useState<number | null>(null);
+  const [isDeptSheetOpen, setIsDeptSheetOpen] = useState(false);
   const { toast } = useToast();
   const { profile, signOut } = useAuth();
   const navigate = useNavigate();
@@ -26,19 +30,9 @@ const Index = () => {
   const loadTasks = async () => {
     console.log('Loading tasks...', new Date().toISOString());
     try {
-      const { data, error } = await supabase
-        .from("tasks")
-        .select("id, title, description, completed, priority, category, due_date, created_at")
-        .order("created_at", { ascending: false });
-
-      if (error) {
-        console.error('Supabase error:', error);
-        toast({ title: "Ошибка загрузки задач", description: error.message, variant: "destructive" });
-        return;
-      }
-
-      console.log('Tasks loaded:', data?.length || 0);
-      const mapped: Task[] = (data ?? []).map((t: any) => ({
+      const rows = await apiGetTasks();
+      console.log('Tasks loaded:', rows?.length || 0);
+      const mapped: Task[] = (rows ?? []).map((t: any) => ({
         id: String(t.id),
         title: t.title,
         description: t.description ?? undefined,
@@ -54,12 +48,22 @@ const Index = () => {
       setTasks(mapped);
     } catch (err) {
       console.error('Load tasks error:', err);
-      toast({ title: "Ошибка загрузки", description: "Не удалось загрузить задачи", variant: "destructive" });
+      toast({ title: "Ошибка загрузки", description: err instanceof Error ? err.message : "Не удалось загрузить задачи", variant: "destructive" });
     }
   };
 
   useEffect(() => {
     loadTasks();
+    const loadDepts = async () => {
+      try {
+        const res = await apiGetDepartmentsWithMembers();
+        setDepartments(res.departments ?? []);
+      } catch (e: any) {
+        console.error("Load departments error", e);
+        toast({ title: "Ошибка загрузки отделов", description: e?.message ?? "Не удалось загрузить отделы", variant: "destructive" });
+      }
+    };
+    loadDepts();
   }, []);
 
   const togglePush = async () => {
@@ -94,71 +98,90 @@ const Index = () => {
       due_date: taskData.dueDate ? taskData.dueDate.toISOString() : null,
     };
 
-    const { data, error } = await supabase.from("tasks").insert(payload).select("id, created_at").single();
+    try {
+      const created = await apiCreateTask(payload);
 
-    if (error) {
-      toast({ title: "Не удалось добавить задачу", description: error.message, variant: "destructive" });
-      return;
+      const newTask: Task = {
+        ...taskData,
+        id: String(created?.id ?? Date.now()),
+        completed: Boolean(created?.completed ?? false),
+        createdAt: created?.created_at ? new Date(created.created_at) : new Date()
+      };
+
+      setTasks(prev => [newTask, ...prev]);
+      toast({ title: "Задача добавлена!", description: `"${taskData.title}" успешно добавлена в список дел.` });
+    } catch (error: any) {
+      toast({ title: "Не удалось добавить задачу", description: error?.message ?? "Ошибка сервера", variant: "destructive" });
     }
-
-    const newTask: Task = {
-      ...taskData,
-      id: String(data?.id ?? Date.now()),
-      completed: false,
-      createdAt: data?.created_at ? new Date(data.created_at) : new Date()
-    };
-
-    setTasks(prev => [newTask, ...prev]);
-    toast({ title: "Задача добавлена!", description: `"${taskData.title}" успешно добавлена в список дел.` });
   };
 
   const toggleTaskComplete = async (id: string) => {
     const existing = tasks.find(t => t.id === id);
     const newCompleted = existing ? !existing.completed : true;
 
-    const { error } = await supabase.from("tasks").update({ completed: newCompleted }).eq("id", id);
+    try {
+      await apiUpdateTask(id, { completed: newCompleted });
 
-    if (error) {
-      toast({ title: "Не удалось обновить задачу", description: error.message, variant: "destructive" });
-      return;
-    }
-
-    setTasks(prev => prev.map(task => task.id === id ? { ...task, completed: newCompleted } : task));
-    if (existing) {
-      toast({
-        title: newCompleted ? "Задача выполнена!" : "Задача возобновлена",
-        description: newCompleted ? `Отличная работа! "${existing.title}" завершена.` : `"${existing.title}" помечена как невыполненная.`
-      });
+      setTasks(prev => prev.map(task => task.id === id ? { ...task, completed: newCompleted } : task));
+      if (existing) {
+        toast({
+          title: newCompleted ? "Задача выполнена!" : "Задача возобновлена",
+          description: newCompleted ? `Отличная работа! "${existing.title}" завершена.` : `"${existing.title}" помечена как невыполненная.`
+        });
+      }
+    } catch (error: any) {
+      toast({ title: "Не удалось обновить задачу", description: error?.message ?? "Ошибка сервера", variant: "destructive" });
     }
   };
 
   const deleteTask = async (id: string) => {
     const task = tasks.find(t => t.id === id);
-    const { error } = await supabase.from("tasks").delete().eq("id", id);
-
-    if (error) {
-      toast({ title: "Не удалось удалить задачу", description: error.message, variant: "destructive" });
-      return;
-    }
-
-    setTasks(prev => prev.filter(t => t.id !== id));
-    if (task) {
-      toast({ title: "Задача удалена", description: `"${task.title}" была удалена из списка.`, variant: "destructive" });
+    try {
+      await apiDeleteTask(id);
+      setTasks(prev => prev.filter(t => t.id !== id));
+      if (task) {
+        toast({ title: "Задача удалена", description: `"${task.title}" была удалена из списка.`, variant: "destructive" });
+      }
+    } catch (error: any) {
+      toast({ title: "Не удалось удалить задачу", description: error?.message ?? "Ошибка сервера", variant: "destructive" });
     }
   };
 
   const updateTask = async (id: string, updates: Partial<Task>) => {
-    // Временно обновляем только локально до добавления полей в БД
-    console.log('Updating task locally:', id, updates);
-    setTasks(prev => prev.map(task => 
+    console.log('Updating task:', id, updates);
+    setTasks(prev => prev.map(task =>
       task.id === id ? { ...task, ...updates } : task
     ));
-    
-    // Показываем уведомление о том, что данные сохранены локально
-    if ('subtasks' in updates || 'plan' in updates) {
-      toast({ 
-        title: "Данные сохранены локально", 
-        description: "После добавления полей в БД данные будут сохраняться постоянно" 
+
+    try {
+      const payload: any = {};
+      if (updates.completed !== undefined) {
+        payload.completed = updates.completed;
+      }
+      if (updates.priority !== undefined) {
+        payload.priority = updates.priority;
+      }
+      if (updates.category !== undefined) {
+        payload.category = updates.category;
+      }
+      if (updates.dueDate !== undefined) {
+        payload.due_date = updates.dueDate ? updates.dueDate.toISOString() : null;
+      }
+      if (Object.keys(payload).length > 0) {
+        await apiUpdateTask(id, payload);
+      }
+      if ('subtasks' in updates || 'plan' in updates) {
+        toast({
+          title: "Данные сохранены локально",
+          description: "После добавления полей в БД данные будут сохраняться постоянно"
+        });
+      }
+    } catch (error: any) {
+      console.error('Update task error', error);
+      toast({
+        title: "Ошибка обновления",
+        description: error?.message ?? "Не удалось сохранить изменения",
+        variant: "destructive"
       });
     }
   };
@@ -180,9 +203,11 @@ const Index = () => {
     highPriority: scopeTasks.filter((t) => t.priority === "high" && !t.completed).length,
   };
 
+  const myDepartments = departments.filter((d: any) => d.is_member);
+
   return (
     <div className="min-h-screen p-4 lg:p-8">
-      <div className={`max-w-6xl mx-auto transition-all duration-300 ${isChatOpen ? 'lg:mr-80 xl:mr-96' : ''}`}>
+      <div className={`max-w-6xl mx-auto transition-all duration-300 ${isChatOpen ? "lg:mr-80 xl:mr-96" : ""}`}>
         {/* Header */}
         <header className="mb-8 animate-fade-in -mt-2">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
@@ -204,9 +229,123 @@ const Index = () => {
                   <span className="uppercase text-[10px] tracking-wide">
                     Роль: {profile.role}
                   </span>
+                  {myDepartments.length > 0 && (
+                    <span className="mt-1 text-[10px]">
+                      Отделы:{" "}
+                      {myDepartments
+                        .map((d: any) => d.name)
+                        .join(", ")}
+                    </span>
+                  )}
                 </div>
               )}
-              <div className="flex gap-2 justify-end">
+              <div className="flex flex-wrap gap-2 justify-end">
+                {profile && (
+                  <Sheet open={isDeptSheetOpen} onOpenChange={setIsDeptSheetOpen}>
+                    <SheetTrigger asChild>
+                      <Button variant="outline" size="sm">
+                        <Users className="h-4 w-4 mr-1" />
+                        Отделы
+                        {myDepartments.length > 0 && (
+                          <Badge variant="secondary" className="ml-1 text-[10px]">
+                            {myDepartments.length}
+                          </Badge>
+                        )}
+                      </Button>
+                    </SheetTrigger>
+                    <SheetContent side="left" className="w-80 sm:max-w-sm overflow-y-auto">
+                      <SheetHeader>
+                        <SheetTitle>Отделы</SheetTitle>
+                      </SheetHeader>
+                      <div className="mt-6 space-y-4">
+                        {departments.length === 0 ? (
+                          <p className="text-sm text-muted-foreground">Пока нет отделов.</p>
+                        ) : (
+                        departments.map((d: any) => {
+                          const members = (d.members ?? []) as { email: string; full_name?: string | null }[];
+                          const isMember = d.is_member;
+                          const hasPending = d.has_pending_request;
+                          const handleJoin = async () => {
+                            try {
+                              setJoiningDeptId(d.id);
+                              await apiRequestJoinDepartment(d.id);
+                              toast({
+                                title: "Заявка отправлена",
+                                description: `Ожидает одобрения модератора в отдел "${d.name}"`,
+                              });
+                              setDepartments((prev) =>
+                                prev.map((x: any) =>
+                                  x.id === d.id ? { ...x, has_pending_request: true } : x
+                                )
+                              );
+                            } catch (e: any) {
+                              toast({
+                                title: "Не удалось отправить заявку",
+                                description: e?.message ?? "Ошибка сервера",
+                                variant: "destructive",
+                              });
+                            } finally {
+                              setJoiningDeptId(null);
+                            }
+                          };
+                          return (
+                            <div
+                              key={d.id}
+                              className="p-3 rounded-lg border bg-card/80 text-sm space-y-2"
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <div>
+                                  <p className="font-semibold">{d.name}</p>
+                                  {d.description && (
+                                    <p className="text-xs text-muted-foreground">{d.description}</p>
+                                  )}
+                                </div>
+                                {profile && (
+                                  <>
+                                    {isMember ? (
+                                      <Badge variant="outline" className="text-[10px] shrink-0">
+                                        Вы в отделе
+                                      </Badge>
+                                    ) : hasPending ? (
+                                      <Badge variant="outline" className="text-[10px] shrink-0">
+                                        Заявка отправлена
+                                      </Badge>
+                                    ) : (
+                                      <Button
+                                        size="sm"
+                                        className="h-7 px-2 text-xs shrink-0"
+                                        onClick={handleJoin}
+                                        disabled={joiningDeptId === d.id}
+                                      >
+                                        Вступить
+                                      </Button>
+                                    )}
+                                  </>
+                                )}
+                              </div>
+                              <div>
+                                <p className="text-xs text-muted-foreground mb-1">Участники:</p>
+                                {members.length ? (
+                                  <ul className="space-y-0.5 max-h-24 overflow-auto pr-1 text-xs">
+                                    {members.map((m, idx) => (
+                                      <li key={idx} className="flex items-center justify-between gap-2 truncate">
+                                        <span className="truncate">{m.full_name || m.email}</span>
+                                        <span className="text-[10px] text-muted-foreground truncate">{m.email}</span>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                ) : (
+                                  <p className="text-xs text-muted-foreground">Пока нет участников.</p>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })
+                        )}
+                      </div>
+                    </SheetContent>
+                  </Sheet>
+                )}
                 {profile?.role === "admin" && (
                   <Button
                     variant="outline"
@@ -311,7 +450,12 @@ const Index = () => {
 
         {/* Task Form */}
         <div className="mb-8">
-          <TaskForm onAddTask={addTask} defaultExpanded />
+          <TaskForm
+            onAddTask={addTask}
+            defaultExpanded
+            taskScope={taskScope}
+            onTaskScopeChange={setTaskScope}
+          />
         </div>
 
         {/* Tasks Section */}

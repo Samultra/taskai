@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Card } from "@/components/ui/card";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -20,10 +21,12 @@ const Register = () => {
     role: "user" as AppRole,
   });
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.email || !form.password) return;
+    setError(null);
     setLoading(true);
     const res = await signUp({
       email: form.email,
@@ -34,6 +37,7 @@ const Register = () => {
     setLoading(false);
 
     if (res.error) {
+      setError(res.error);
       toast({
         title: "Ошибка регистрации",
         description: res.error,
@@ -64,6 +68,11 @@ const Register = () => {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
+          {error && (
+            <Alert variant="destructive">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
           <div className="space-y-2">
             <Label htmlFor="fullName">Имя</Label>
             <Input

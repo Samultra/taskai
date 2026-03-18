@@ -10,16 +10,9 @@ const tips: string[] = [
 let stopTimerRef: (() => void) | null = null;
 
 export async function registerServiceWorker(): Promise<ServiceWorkerRegistration | null> {
-	if (!('serviceWorker' in navigator)) return null;
-	try {
-		const reg = await navigator.serviceWorker.register('/sw.js?v=2');
-		// Принудительно проверить обновления SW
-		void reg.update();
-		return reg;
-	} catch (e) {
-		console.warn('SW register failed', e);
-		return null;
-	}
+	// В проде на GitHub Pages отключаем регистрацию SW,
+	// чтобы не было агрессивного кэширования и застревания старого бандла.
+	return null;
 }
 
 export async function requestPermission(): Promise<boolean> {
@@ -29,10 +22,8 @@ export async function requestPermission(): Promise<boolean> {
 	return perm === 'granted';
 }
 
-export async function showNotification(title: string, body: string, payload?: any) {
-	const reg = await navigator.serviceWorker.getRegistration();
-	if (!reg) return;
-	reg.active?.postMessage({ type: 'SHOW_NOTIFICATION', title, body, payload });
+export async function showNotification(_title: string, _body: string, _payload?: any) {
+	// Ничего не делаем, т.к. SW отключён.
 }
 
 export function startTipsScheduler(intervalMinutes = 60) {

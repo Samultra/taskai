@@ -11,6 +11,9 @@ import { Task } from "./TaskCard";
 interface TaskFormProps {
   onAddTask: (task: Omit<Task, "id" | "completed" | "createdAt">) => void;
   defaultExpanded?: boolean;
+  /** Куда добавлять задачу: "personal" = Личные, "team" = Команда */
+  taskScope?: "personal" | "team";
+  onTaskScopeChange?: (scope: "personal" | "team") => void;
 }
 
 const categories = [
@@ -24,7 +27,7 @@ const categories = [
   "Творчество",
 ];
 
-const TaskForm = ({ onAddTask, defaultExpanded }: TaskFormProps) => {
+const TaskForm = ({ onAddTask, defaultExpanded, taskScope = "personal", onTaskScopeChange }: TaskFormProps) => {
   const [isExpanded, setIsExpanded] = useState(!!defaultExpanded);
   const [formData, setFormData] = useState({
     title: "",
@@ -34,6 +37,8 @@ const TaskForm = ({ onAddTask, defaultExpanded }: TaskFormProps) => {
     dueDate: ""
   });
 
+  const scopeCategory = taskScope === "team" ? "Команда" : "Личное";
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.title.trim()) return;
@@ -42,7 +47,7 @@ const TaskForm = ({ onAddTask, defaultExpanded }: TaskFormProps) => {
       title: formData.title.trim(),
       description: formData.description.trim() || undefined,
       priority: formData.priority,
-      category: formData.category,
+      category: scopeCategory,
       dueDate: formData.dueDate ? new Date(formData.dueDate) : undefined
     });
 
@@ -51,7 +56,7 @@ const TaskForm = ({ onAddTask, defaultExpanded }: TaskFormProps) => {
       title: "",
       description: "",
       priority: "medium",
-      category: "Личное", 
+      category: "Личное",
       dueDate: ""
     });
     setIsExpanded(false);
@@ -69,14 +74,32 @@ const TaskForm = ({ onAddTask, defaultExpanded }: TaskFormProps) => {
     <Card className="glass-effect shadow-card hover:shadow-floating transition-all duration-300">
       <div className="p-4">
         {!isExpanded ? (
-          <div className="flex gap-3">
+          <div className="flex flex-col sm:flex-row gap-3">
+            <div className="flex gap-2 shrink-0">
+              <Button
+                type="button"
+                variant={taskScope === "personal" ? "default" : "outline"}
+                size="sm"
+                onClick={() => onTaskScopeChange?.("personal")}
+              >
+                Личные
+              </Button>
+              <Button
+                type="button"
+                variant={taskScope === "team" ? "default" : "outline"}
+                size="sm"
+                onClick={() => onTaskScopeChange?.("team")}
+              >
+                Команда
+              </Button>
+            </div>
             <Input
               value={formData.title}
               onChange={(e) => setFormData(prev => ({ ...prev, title: e.target.value }))}
               placeholder="Добавить новую задачу..."
-              className="flex-1"
+              className="flex-1 min-w-0"
               onFocus={() => setIsExpanded(true)}
-              onKeyPress={(e) => e.key === "Enter" && handleQuickAdd()}
+              onKeyDown={(e) => e.key === "Enter" && handleQuickAdd()}
             />
             <Button 
               onClick={handleQuickAdd}
@@ -87,6 +110,30 @@ const TaskForm = ({ onAddTask, defaultExpanded }: TaskFormProps) => {
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4 animate-slide-up">
+            <div className="space-y-2">
+              <Label>Куда добавить задачу</Label>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant={taskScope === "personal" ? "default" : "outline"}
+                  size="sm"
+                  className="flex-1"
+                  onClick={() => onTaskScopeChange?.("personal")}
+                >
+                  Личные
+                </Button>
+                <Button
+                  type="button"
+                  variant={taskScope === "team" ? "default" : "outline"}
+                  size="sm"
+                  className="flex-1"
+                  onClick={() => onTaskScopeChange?.("team")}
+                >
+                  Команда
+                </Button>
+              </div>
+            </div>
+
             <div className="space-y-2">
               <Label htmlFor="task-title">Название задачи</Label>
               <Input

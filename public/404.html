@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>TaskAI</title>
+    <script>
+      // GitHub Pages 404 handler - редирект на главную
+      // React Router обработает маршрут из истории браузера
+      sessionStorage.redirect = location.pathname;
+      location.replace('/taskai/');
+    </script>
+  </head>
+  <body>
+    <p>Redirecting...</p>
+  </body>
+</html>

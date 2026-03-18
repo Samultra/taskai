@@ -8,7 +8,18 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth, AppRole, Profile } from "@/hooks/useAuth";
-import { supabase } from "@/lib/supabase";
+import {
+  apiModeratorOverview,
+  apiModeratorHandleRequest,
+  apiModeratorUpdateUserRole,
+  apiModeratorBlockUser,
+  apiModeratorUpdateUserName,
+  apiModeratorUpdateProjectMeta,
+  apiModeratorAddMember,
+  apiModeratorRemoveMember,
+  apiModeratorUpdateTask,
+  apiModeratorHandleDeptJoinRequest,
+} from "@/lib/api";
 
 interface RegistrationRequest {
   id: number;
@@ -57,6 +68,16 @@ interface ProjectTaskRow {
   assignee_profile_id: string | null;
 }
 
+interface DepartmentJoinRequest {
+  id: number;
+  department_id: number;
+  department_name: string;
+  email: string;
+  full_name: string | null;
+  status: string;
+  created_at: string;
+}
+
 const ModeratorDashboard = () => {
   const { profile } = useAuth();
   const { toast } = useToast();
@@ -69,99 +90,27 @@ const ModeratorDashboard = () => {
   const [users, setUsers] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(false);
   const [memberEmailByProject, setMemberEmailByProject] = useState<Record<number, string>>({});
+  const [deptRequests, setDeptRequests] = useState<DepartmentJoinRequest[]>([]);
 
   const loadAll = async () => {
     setLoading(true);
     try {
-      const [{ data, error }, { data: logsData, error: logsError }] = await Promise.all([
-        supabase
-          .from("registration_requests")
-          .select("id, email, full_name, role_requested, status, created_at")
-          .eq("status", "pending")
-          .order("created_at", { ascending: false }),
-        supabase
-          .from("activity_logs")
-          .select("id, actor_email, action, target_type, target_id, details, created_at")
-          .eq("target_type", "registration_request")
-          .order("created_at", { ascending: false })
-          .limit(50),
-      ]);
-
-      if (error) {
-        console.error(error);
-        toast({
-          title: "Ошибка загрузки заявок",
-          description: error.message,
-          variant: "destructive",
-        });
-      } else {
-        setRequests((data ?? []) as RegistrationRequest[]);
-      }
-
-      if (!logsError) {
-        setLogs((logsData ?? []) as ActivityLog[]);
-      }
-
       if (!profile?.id) return;
-
-      // проекты, где модератор владелец или участник
-      const [{ data: owned, error: ownedErr }, { data: mem, error: memErr }] = await Promise.all([
-        supabase
-          .from("projects")
-          .select("id, name, code, color, owner_profile_id, is_archived, created_at")
-          .eq("owner_profile_id", profile.id)
-          .order("created_at", { ascending: false }),
-        supabase.from("project_members").select("project_id, profile_id, role").eq("profile_id", profile.id),
-      ]);
-      if (ownedErr) console.error(ownedErr);
-      if (memErr) console.error(memErr);
-
-      const memberProjectIds = (mem ?? []).map((m: any) => m.project_id);
-      let memberProjects: any[] = [];
-      if (memberProjectIds.length) {
-        const { data: proj2, error: proj2Err } = await supabase
-          .from("projects")
-          .select("id, name, code, color, owner_profile_id, is_archived, created_at")
-          .in("id", memberProjectIds)
-          .order("created_at", { ascending: false });
-        if (proj2Err) console.error(proj2Err);
-        memberProjects = proj2 ?? [];
-      }
-
-      const merged = [...(owned ?? []), ...memberProjects];
-      const unique = Array.from(new Map(merged.map((p: any) => [p.id, p])).values());
-      setProjects(unique as Project[]);
-
-      // участники всех "моих" проектов (чтобы показывать и удалять/добавлять)
-      const myProjectIds = unique.map((p: any) => p.id);
-      if (myProjectIds.length) {
-        const [
-          { data: allMembers, error: allMemErr },
-          { data: taskRows, error: taskErr },
-          { data: usersRows, error: usersErr },
-        ] = await Promise.all([
-          supabase.from("project_members").select("project_id, profile_id, role").in("project_id", myProjectIds),
-          supabase
-            .from("tasks")
-            .select("id, project_id, title, status, priority, due_date, assignee_profile_id")
-            .in("project_id", myProjectIds)
-            .order("due_date", { ascending: true })
-            .limit(200),
-          supabase
-            .from("profiles")
-            .select("id, email, full_name, role, is_blocked, created_at")
-            .order("email", { ascending: true }),
-        ]);
-        if (allMemErr) console.error(allMemErr);
-        if (taskErr) console.error(taskErr);
-        if (usersErr) console.error(usersErr);
-        setMembers((allMembers ?? []) as ProjectMember[]);
-        setTasks((taskRows ?? []) as ProjectTaskRow[]);
-        setUsers((usersRows ?? []) as Profile[]);
-      } else {
-        setMembers([]);
-        setTasks([]);
-      }
+      const data = await apiModeratorOverview();
+      setRequests((data.requests ?? []) as RegistrationRequest[]);
+      setLogs((data.logs ?? []) as ActivityLog[]);
+      setProjects((data.projects ?? []) as Project[]);
+      setMembers((data.members ?? []) as ProjectMember[]);
+      setTasks((data.tasks ?? []) as ProjectTaskRow[]);
+      setUsers((data.users ?? []) as Profile[]);
+      setDeptRequests((data.departmentJoinRequests ?? []) as DepartmentJoinRequest[]);
+    } catch (error: any) {
+      console.error(error);
+      toast({
+        title: "Ошибка загрузки данных",
+        description: error?.message ?? "Не удалось загрузить данные модератора",
+        variant: "destructive",
+      });
     } finally {
       setLoading(false);
     }
@@ -172,48 +121,13 @@ const ModeratorDashboard = () => {
   }, [profile?.id]);
 
   const handleRequest = async (id: number, action: "approve" | "reject", requestedRole: AppRole, email: string) => {
-    const status = action === "approve" ? "approved" : "rejected";
-    const updates = {
-      status,
-      processed_at: new Date().toISOString(),
-    };
-
-    const { error } = await supabase.from("registration_requests").update(updates).eq("id", id);
-    if (error) {
-      toast({ title: "Ошибка обновления заявки", description: error.message, variant: "destructive" });
-      return;
-    }
-
-    if (action === "approve") {
-      // модератор может назначить роль moderator, но не admin
-      if (requestedRole === "moderator") {
-        const { data, error: findError } = await supabase
-          .from("profiles")
-          .select("id")
-          .eq("email", email)
-          .maybeSingle();
-        if (!findError && data?.id) {
-          await supabase.from("profiles").update({ role: "moderator" }).eq("id", data.id);
-        }
-      }
-
-      toast({ title: "Заявка отмечена как одобренная" });
-    } else {
-      toast({ title: "Заявка отклонена" });
-    }
-
-    setRequests((prev) => prev.filter((r) => r.id !== id));
-
-    if (profile) {
-      await supabase.from("activity_logs").insert({
-        actor_id: profile.id,
-        actor_email: profile.email,
-        action: action === "approve" ? "approve_request_moderator" : "reject_request_moderator",
-        target_type: "registration_request",
-        target_id: String(id),
-        details: { requested_role: requestedRole, email },
-      });
+    try {
+      await apiModeratorHandleRequest(id, action, requestedRole, email);
+      setRequests((prev) => prev.filter((r) => r.id !== id));
+      toast({ title: action === "approve" ? "Заявка отмечена как одобренная" : "Заявка отклонена" });
       loadAll();
+    } catch (error: any) {
+      toast({ title: "Ошибка обновления заявки", description: error?.message ?? "Не удалось обновить заявку", variant: "destructive" });
     }
   };
 
@@ -247,116 +161,75 @@ const ModeratorDashboard = () => {
   const handleUserRoleChange = async (userId: string, role: AppRole) => {
     // модератор не может назначать/снимать admin, только user/moderator
     if (role === "admin") return;
-    const { error } = await supabase.from("profiles").update({ role }).eq("id", userId);
-    if (error) {
-      toast({ title: "Ошибка смены роли", description: error.message, variant: "destructive" });
-      return;
+    try {
+      await apiModeratorUpdateUserRole(userId, role);
+      setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, role } : u)));
+      toast({ title: "Роль обновлена", description: "Роль пользователя успешно изменена." });
+    } catch (error: any) {
+      toast({ title: "Ошибка смены роли", description: error?.message ?? "Не удалось обновить роль", variant: "destructive" });
     }
-    setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, role } : u)));
-
-    if (profile) {
-      await supabase.from("activity_logs").insert({
-        actor_id: profile.id,
-        actor_email: profile.email,
-        action: "moderator_change_role",
-        target_type: "user",
-        target_id: userId,
-        details: { new_role: role },
-      });
-    }
-
-    toast({ title: "Роль обновлена", description: "Роль пользователя успешно изменена." });
   };
 
   const handleUserBlockToggle = async (user: Profile) => {
     const nextBlocked = !user.is_blocked;
-    const { error } = await supabase.from("profiles").update({ is_blocked: nextBlocked }).eq("id", user.id);
-    if (error) {
-      toast({ title: "Ошибка изменения статуса", description: error.message, variant: "destructive" });
-      return;
-    }
-    setUsers((prev) => prev.map((u) => (u.id === user.id ? { ...u, is_blocked: nextBlocked } : u)));
-
-    if (profile) {
-      await supabase.from("activity_logs").insert({
-        actor_id: profile.id,
-        actor_email: profile.email,
-        action: nextBlocked ? "moderator_block_user" : "moderator_unblock_user",
-        target_type: "user",
-        target_id: user.id,
-        details: { email: user.email },
+    try {
+      await apiModeratorBlockUser(user.id, nextBlocked);
+      setUsers((prev) => prev.map((u) => (u.id === user.id ? { ...u, is_blocked: nextBlocked } : u)));
+      toast({
+        title: nextBlocked ? "Пользователь заблокирован" : "Пользователь разблокирован",
+        description: user.email,
       });
+    } catch (error: any) {
+      toast({ title: "Ошибка изменения статуса", description: error?.message ?? "Не удалось изменить статус", variant: "destructive" });
     }
-
-    toast({
-      title: nextBlocked ? "Пользователь заблокирован" : "Пользователь разблокирован",
-      description: user.email,
-    });
   };
 
   const handleUserNameChange = async (userId: string, fullName: string) => {
-    const { error } = await supabase.from("profiles").update({ full_name: fullName }).eq("id", userId);
-    if (error) {
-      toast({ title: "Ошибка сохранения имени", description: error.message, variant: "destructive" });
-      return;
-    }
-    setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, full_name: fullName } : u)));
-
-    if (profile) {
-      await supabase.from("activity_logs").insert({
-        actor_id: profile.id,
-        actor_email: profile.email,
-        action: "moderator_update_full_name",
-        target_type: "user",
-        target_id: userId,
-        details: { full_name: fullName },
-      });
+    try {
+      await apiModeratorUpdateUserName(userId, fullName);
+      setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, full_name: fullName } : u)));
+    } catch (error: any) {
+      toast({ title: "Ошибка сохранения имени", description: error?.message ?? "Не удалось сохранить имя", variant: "destructive" });
     }
   };
 
   const handleProjectMetaChange = async (projectId: number, updates: Partial<Pick<Project, "name" | "code" | "color">>) => {
     if (!Object.keys(updates).length) return;
-    const { error } = await supabase.from("projects").update(updates).eq("id", projectId);
-    if (error) {
-      toast({ title: "Ошибка обновления проекта", description: error.message, variant: "destructive" });
-      return;
+    try {
+      await apiModeratorUpdateProjectMeta(projectId, updates);
+      setProjects((prev) => prev.map((p) => (p.id === projectId ? { ...p, ...updates } : p)));
+      toast({ title: "Проект обновлён" });
+    } catch (error: any) {
+      toast({ title: "Ошибка обновления проекта", description: error?.message ?? "Не удалось обновить проект", variant: "destructive" });
     }
-    setProjects((prev) => prev.map((p) => (p.id === projectId ? { ...p, ...updates } : p)));
-    toast({ title: "Проект обновлён" });
   };
 
   const addMember = async (projectId: number) => {
     const email = (memberEmailByProject[projectId] ?? "").trim();
     if (!email) return;
-    const { data: prof, error: findErr } = await supabase.from("profiles").select("id").eq("email", email).maybeSingle();
-    if (findErr || !prof?.id) {
-      toast({ title: "Пользователь не найден", description: email, variant: "destructive" });
-      return;
+    try {
+      const result = await apiModeratorAddMember(projectId, email);
+      setMembers((prev) => [...prev, { project_id: result.project_id, profile_id: result.profile_id, role: result.role }]);
+      setMemberEmailByProject((prev) => ({ ...prev, [projectId]: "" }));
+      toast({ title: "Участник добавлен" });
+    } catch (error: any) {
+      toast({ title: "Пользователь не найден или ошибка добавления", description: error?.message ?? email, variant: "destructive" });
     }
-    const { error } = await supabase.from("project_members").insert({ project_id: projectId, profile_id: prof.id, role: "member" });
-    if (error) {
-      toast({ title: "Ошибка добавления", description: error.message, variant: "destructive" });
-      return;
-    }
-    setMembers((prev) => [...prev, { project_id: projectId, profile_id: prof.id, role: "member" }]);
-    setMemberEmailByProject((prev) => ({ ...prev, [projectId]: "" }));
-    toast({ title: "Участник добавлен" });
   };
 
   const removeMember = async (projectId: number, profileId: string) => {
-    const { error } = await supabase.from("project_members").delete().eq("project_id", projectId).eq("profile_id", profileId);
-    if (error) {
-      toast({ title: "Ошибка удаления", description: error.message, variant: "destructive" });
-      return;
+    try {
+      await apiModeratorRemoveMember(projectId, profileId);
+      setMembers((prev) => prev.filter((m) => !(m.project_id === projectId && m.profile_id === profileId)));
+    } catch (error: any) {
+      toast({ title: "Ошибка удаления", description: error?.message ?? "Не удалось удалить участника", variant: "destructive" });
     }
-    setMembers((prev) => prev.filter((m) => !(m.project_id === projectId && m.profile_id === profileId)));
   };
 
   const updateTask = async (id: number, updates: Partial<ProjectTaskRow>) => {
     const payload: any = {};
     if (updates.status) {
       payload.status = updates.status;
-      payload.completed = updates.status === "done";
     }
     if (updates.due_date !== undefined) {
       payload.due_date = updates.due_date ? new Date(updates.due_date).toISOString() : null;
@@ -365,12 +238,28 @@ const ModeratorDashboard = () => {
       payload.assignee_profile_id = updates.assignee_profile_id || null;
     }
     if (!Object.keys(payload).length) return;
-    const { error } = await supabase.from("tasks").update(payload).eq("id", id);
-    if (error) {
-      toast({ title: "Ошибка обновления задачи", description: error.message, variant: "destructive" });
-      return;
+    try {
+      await apiModeratorUpdateTask(id, payload);
+      setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, ...updates } : t)));
+    } catch (error: any) {
+      toast({ title: "Ошибка обновления задачи", description: error?.message ?? "Не удалось обновить задачу", variant: "destructive" });
     }
-    setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, ...updates } : t)));
+  };
+
+  const handleDeptJoinRequest = async (id: number, action: "approve" | "reject") => {
+    try {
+      await apiModeratorHandleDeptJoinRequest(id, action);
+      setDeptRequests(prev => prev.filter(r => r.id !== id));
+      toast({
+        title: action === "approve" ? "Заявка одобрена" : "Заявка отклонена",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Ошибка обработки заявки отдела",
+        description: error?.message ?? "Не удалось обработать заявку",
+        variant: "destructive",
+      });
+    }
   };
 
   return (
@@ -490,6 +379,53 @@ const ModeratorDashboard = () => {
               );
             })}
             {projects.length === 0 && <p className="text-sm text-muted-foreground">Проектов пока нет.</p>}
+          </div>
+        </Card>
+
+        <Card className="p-4 space-y-4 glass-effect shadow-card border border-border/80">
+          <div className="flex items-center justify-between">
+            <h2 className="font-semibold">Заявки в отделы</h2>
+            <Badge variant="outline">{deptRequests.length}</Badge>
+          </div>
+          <div className="space-y-3 max-h-[320px] overflow-auto pr-1 text-xs">
+            {deptRequests.map((r) => (
+              <div key={r.id} className="border-b pb-2 last:border-b-0 space-y-1">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate">{r.email}</p>
+                    {r.full_name && (
+                      <p className="text-xs text-muted-foreground truncate">Имя: {r.full_name}</p>
+                    )}
+                    <p className="text-[11px] text-muted-foreground truncate">
+                      Отдел: {r.department_name}
+                    </p>
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Отправлена: {new Date(r.created_at).toLocaleString("ru-RU")}
+                </p>
+                <div className="flex gap-2 pt-1">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleDeptJoinRequest(r.id, "approve")}
+                  >
+                    Одобрить
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="text-destructive border-destructive/50"
+                    onClick={() => handleDeptJoinRequest(r.id, "reject")}
+                  >
+                    Отклонить
+                  </Button>
+                </div>
+              </div>
+            ))}
+            {deptRequests.length === 0 && (
+              <p className="text-sm text-muted-foreground">Нет заявок в отделы.</p>
+            )}
           </div>
         </Card>
 
