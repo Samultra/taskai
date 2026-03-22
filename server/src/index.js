@@ -15,11 +15,15 @@ dotenv.config();
 
 const app = express();
 
-const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || "http://localhost:5173";
+/** Несколько origin через запятую: прод + локальный dev (например https://samultra.github.io,http://localhost:8080) */
+const ALLOWED_ORIGINS = (process.env.FRONTEND_ORIGIN || "http://localhost:5173")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
 
 app.use(
   cors({
-    origin: FRONTEND_ORIGIN,
+    origin: ALLOWED_ORIGINS,
     credentials: false,
   }),
 );
