@@ -1,6 +1,8 @@
 import express from "express";
+import { statusImpliesCompleted } from "./taskStatus.js";
 import { authMiddleware } from "./auth.js";
 import { query } from "./db.js";
+import { coerceTaskStatusForDb } from "./schemaFeatures.js";
 
 const router = express.Router();
 
@@ -87,9 +89,16 @@ router.get("/overview", requireModerator, async (req, res) => {
     let tasks = [];
     let users = [];
 
+    const usersRows = await query(
+      `SELECT id, email, full_name, role, is_blocked, created_at
+       FROM profiles
+       ORDER BY email ASC`,
+    );
+    users = usersRows.rows;
+
     if (projects.length) {
       const ids = projects.map((p) => p.id);
-      const [allMembers, taskRows, usersRows] = await Promise.all([
+      const [allMembers, taskRows] = await Promise.all([
         query(
           `SELECT project_id, profile_id, role
            FROM project_members
@@ -104,15 +113,9 @@ router.get("/overview", requireModerator, async (req, res) => {
            LIMIT 200`,
           [ids],
         ),
-        query(
-          `SELECT id, email, full_name, role, is_blocked, created_at
-           FROM profiles
-           ORDER BY email ASC`,
-        ),
       ]);
       members = allMembers.rows;
       tasks = taskRows.rows;
-      users = usersRows.rows;
     }
 
     res.json({
@@ -218,6 +221,11 @@ router.post("/users/:id/role", requireModerator, async (req, res) => {
     const { id } = req.params;
     const { role } = req.body || {};
     if (!role || role === "admin") return res.status(400).json({ error: "invalid role" });
+    const target = await query(`SELECT role FROM profiles WHERE id = $1`, [id]);
+    if (target.rowCount === 0) return res.status(404).json({ error: "User not found" });
+    if (target.rows[0].role === "admin") {
+      return res.status(403).json({ error: "Cannot change admin role" });
+    }
     await query(`UPDATE profiles SET role = $1 WHERE id = $2`, [role, id]);
     await query(
       `INSERT INTO activity_logs (actor_id, actor_email, action, target_type, target_id, details)
@@ -237,6 +245,12 @@ router.post("/users/:id/block", requireModerator, async (req, res) => {
     const { is_blocked } = req.body || {};
     if (typeof is_blocked !== "boolean") {
       return res.status(400).json({ error: "is_blocked must be boolean" });
+    }
+    const target = await query(`SELECT role FROM profiles WHERE id = $1`, [id]);
+    if (target.rowCount === 0) return res.status(404).json({ error: "User not found" });
+    // Запрет только на блокировку админа; разблокировать админа можно (например после ошибки)
+    if (target.rows[0].role === "admin" && is_blocked) {
+      return res.status(403).json({ error: "Cannot block admin" });
     }
     await query(`UPDATE profiles SET is_blocked = $1 WHERE id = $2`, [is_blocked, id]);
     await query(
@@ -261,6 +275,11 @@ router.post("/users/:id/name", requireModerator, async (req, res) => {
   try {
     const { id } = req.params;
     const { full_name } = req.body || {};
+    const target = await query(`SELECT role FROM profiles WHERE id = $1`, [id]);
+    if (target.rowCount === 0) return res.status(404).json({ error: "User not found" });
+    if (target.rows[0].role === "admin") {
+      return res.status(403).json({ error: "Cannot edit admin profile" });
+    }
     await query(`UPDATE profiles SET full_name = $1 WHERE id = $2`, [full_name ?? null, id]);
     await query(
       `INSERT INTO activity_logs (actor_id, actor_email, action, target_type, target_id, details)
@@ -348,8 +367,9 @@ router.post("/tasks/:id", requireModerator, async (req, res) => {
     const { status, due_date, assignee_profile_id } = req.body || {};
     const payload = {};
     if (status) {
-      payload.status = status;
-      payload.completed = status === "done";
+      const st = coerceTaskStatusForDb(status);
+      payload.status = st;
+      payload.completed = statusImpliesCompleted(st);
     }
     if (due_date !== undefined) {
       payload.due_date = due_date || null;

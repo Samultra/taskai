@@ -41,6 +41,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setLoading(true);
       try {
         const current = await apiGetCurrentProfile();
+        if (current?.is_blocked) {
+          await apiSignOut();
+          setUser(null);
+          setProfile(null);
+          return;
+        }
         setUser(current);
         setProfile(current);
       } catch (err) {

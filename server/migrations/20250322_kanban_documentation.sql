@@ -1,0 +1,10 @@
+-- Миграция канбана + documentation разбита на ДВА шага (ограничение PostgreSQL 55P04).
+--
+-- В pgAdmin:
+--   1) Query Tool → Open → 20250322_kanban_step1_enum_and_column.sql → Execute (F5)
+--   2) Новый Query Tool (или очистить окно) → Open → 20250322_kanban_step2_migrate_rows.sql → F5
+--
+-- Не вставляйте оба файла в один запуск.
+--
+-- PostgreSQL 14 и ниже: в step1 замените "ADD VALUE IF NOT EXISTS" на "ADD VALUE" по одной строке;
+-- если значение уже есть — пропустите строку с ошибкой «already exists».

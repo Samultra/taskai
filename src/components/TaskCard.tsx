@@ -19,6 +19,15 @@ export interface Task {
   createdAt: Date;
   subtasks?: string;
   plan?: string;
+  /** false = задача коллеги по отделу (только просмотр) */
+  isOwner?: boolean;
+  /** с API /tasks: можно ли менять задачу (владелец или отдел для «Команда») */
+  canEdit?: boolean;
+  ownerEmail?: string;
+  status?: string;
+  documentation?: string | null;
+  /** Задача из проекта (есть на главной у исполнителя) */
+  projectId?: number;
 }
 
 interface TaskCardProps {
@@ -26,6 +35,7 @@ interface TaskCardProps {
   onToggleComplete: (id: string) => void;
   onDelete: (id: string) => void;
   onUpdateTask: (id: string, updates: Partial<Task>) => void;
+  readOnly?: boolean;
 }
 
 const priorityColors = {
@@ -70,8 +80,9 @@ const parseMaybeArray = (raw?: string, key?: string): any[] | null => {
   return null;
 };
 
-const TaskCard = ({ task, onToggleComplete, onDelete, onUpdateTask }: TaskCardProps) => {
+const TaskCard = ({ task, onToggleComplete, onDelete, onUpdateTask, readOnly }: TaskCardProps) => {
   const [isHovered, setIsHovered] = useState(false);
+  const isReadOnly = readOnly || task.canEdit === false || (task.canEdit === undefined && task.isOwner === false);
   const { toast } = useToast();
   const [loading, setLoading] = useState<string | null>(null);
 
@@ -129,6 +140,9 @@ const TaskCard = ({ task, onToggleComplete, onDelete, onUpdateTask }: TaskCardPr
             )}>
               {task.title}
             </h3>
+            {isReadOnly && task.ownerEmail && (
+              <p className="text-xs text-muted-foreground">От: {task.ownerEmail}</p>
+            )}
             {task.description && (
               <p className="text-sm text-muted-foreground line-clamp-2">
                 {task.description}
@@ -136,27 +150,29 @@ const TaskCard = ({ task, onToggleComplete, onDelete, onUpdateTask }: TaskCardPr
             )}
           </div>
           
-          <div className={cn(
-            "flex items-center gap-1 opacity-0 transition-opacity",
-            isHovered && "opacity-100"
-          )}>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => onToggleComplete(task.id)}
-              className="h-8 w-8 p-0 hover:bg-success/10 hover:text-success"
-            >
-              <Check className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm" 
-              onClick={() => onDelete(task.id)}
-              className="h-8 w-8 p-0 hover:bg-destructive/10 hover:text-destructive"
-            >
-              <Trash2 className="h-4 w-4" />
-            </Button>
-          </div>
+          {!isReadOnly && (
+            <div className={cn(
+              "flex items-center gap-1 opacity-0 transition-opacity",
+              isHovered && "opacity-100"
+            )}>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => onToggleComplete(task.id)}
+                className="h-8 w-8 p-0 hover:bg-success/10 hover:text-success"
+              >
+                <Check className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm" 
+                onClick={() => onDelete(task.id)}
+                className="h-8 w-8 p-0 hover:bg-destructive/10 hover:text-destructive"
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </div>
+          )}
         </div>
 
         {/* Meta info */}
@@ -187,10 +203,10 @@ const TaskCard = ({ task, onToggleComplete, onDelete, onUpdateTask }: TaskCardPr
 
         {/* AI actions */}
         <div className="flex gap-2 pt-1 flex-col sm:flex-row">
-          <Button variant="outline" size="sm" onClick={handleSubtasks} disabled={loading==='subs'} className="w-full sm:w-auto">
+          <Button variant="outline" size="sm" onClick={handleSubtasks} disabled={isReadOnly || loading==='subs'} className="w-full sm:w-auto">
             <ListChecks className="h-4 w-4 mr-1" /> Подзадачи
           </Button>
-          <Button variant="outline" size="sm" onClick={handlePlan} disabled={loading==='plan'} className="w-full sm:w-auto">
+          <Button variant="outline" size="sm" onClick={handlePlan} disabled={isReadOnly || loading==='plan'} className="w-full sm:w-auto">
             <CalendarClock className="h-4 w-4 mr-1" /> План
           </Button>
           {(hasSubtasks || hasPlan) && (

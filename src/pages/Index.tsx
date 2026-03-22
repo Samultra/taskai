@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { Brain, Calendar, CheckCircle2, Clock, MessageSquare, Sparkles, Star, Bell, BellOff, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -10,9 +10,20 @@ import TaskCard, { Task } from "@/components/TaskCard";
 import TaskForm from "@/components/TaskForm";
 import AIChat from "@/components/AIChat";
 import { useToast } from "@/hooks/use-toast";
-import { apiCreateTask, apiDeleteTask, apiGetTasks, apiUpdateTask, apiGetDepartmentsWithMembers, apiRequestJoinDepartment } from "@/lib/api";
+import {
+  apiCreateTask,
+  apiDeleteTask,
+  apiGetTasks,
+  apiUpdateTask,
+  apiProjectUpdateTask,
+  apiGetDepartmentsWithMembers,
+  apiRequestJoinDepartment,
+} from "@/lib/api";
 import { registerServiceWorker, requestPermission, startTipsScheduler, stopTipsScheduler, showNotification } from "@/lib/notifications";
 import { useAuth } from "@/hooks/useAuth";
+import { KanbanBoard, type KanbanTaskItem } from "@/components/KanbanBoard";
+import { normalizeKanbanStatus, type KanbanColumnId } from "@/lib/kanban";
+import { cn } from "@/lib/utils";
 
 const Index = () => {
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -42,7 +53,13 @@ const Index = () => {
         dueDate: t.due_date ? new Date(t.due_date) : undefined,
         createdAt: t.created_at ? new Date(t.created_at) : new Date(),
         subtasks: undefined,
-        plan: undefined
+        plan: undefined,
+        isOwner: t.is_owner !== false,
+        canEdit: t.can_edit !== false,
+        ownerEmail: t.owner_email ?? undefined,
+        status: t.status ?? undefined,
+        documentation: t.documentation ?? null,
+        projectId: t.project_id != null && t.project_id !== "" ? Number(t.project_id) : undefined,
       }));
 
       setTasks(mapped);
@@ -105,7 +122,10 @@ const Index = () => {
         ...taskData,
         id: String(created?.id ?? Date.now()),
         completed: Boolean(created?.completed ?? false),
-        createdAt: created?.created_at ? new Date(created.created_at) : new Date()
+        createdAt: created?.created_at ? new Date(created.created_at) : new Date(),
+        canEdit: true,
+        status: created?.status,
+        documentation: created?.documentation ?? null,
       };
 
       setTasks(prev => [newTask, ...prev]);
@@ -167,6 +187,12 @@ const Index = () => {
       if (updates.dueDate !== undefined) {
         payload.due_date = updates.dueDate ? updates.dueDate.toISOString() : null;
       }
+      if (updates.status !== undefined) {
+        payload.status = updates.status;
+      }
+      if (updates.documentation !== undefined) {
+        payload.documentation = updates.documentation;
+      }
       if (Object.keys(payload).length > 0) {
         await apiUpdateTask(id, payload);
       }
@@ -186,8 +212,11 @@ const Index = () => {
     }
   };
 
+  const isTeamScopeTask = (task: Task) =>
+    task.category === "Команда" || (task.category === "Проект" && task.projectId != null);
+
   const scopeTasks = tasks.filter((task) =>
-    taskScope === "personal" ? task.category !== "Команда" : task.category === "Команда"
+    taskScope === "personal" ? !isTeamScopeTask(task) : isTeamScopeTask(task)
   );
 
   const filteredTasks = scopeTasks.filter((task) => {
@@ -205,9 +234,81 @@ const Index = () => {
 
   const myDepartments = departments.filter((d: any) => d.is_member);
 
+  const teamKanbanItems: KanbanTaskItem[] = useMemo(() => {
+    return tasks
+      .filter((t) => isTeamScopeTask(t))
+      .map((t) => ({
+        id: t.id,
+        title: t.title,
+        description: t.description ?? null,
+        documentation: t.documentation ?? null,
+        status: normalizeKanbanStatus(t.status),
+        priority: t.priority,
+        assigneeLabel: t.ownerEmail ? `Автор: ${t.ownerEmail}` : null,
+        readOnly: t.canEdit === false,
+        projectId: t.projectId,
+      }));
+  }, [tasks]);
+
+  const onTeamKanbanStatus = useCallback(
+    async (taskId: string | number, status: KanbanColumnId) => {
+      const id = String(taskId);
+      const row = teamKanbanItems.find((t) => String(t.id) === id);
+      if (row?.readOnly) {
+        toast({ title: "Нет прав менять эту задачу", variant: "destructive" });
+        return;
+      }
+      try {
+        if (row?.projectId != null) {
+          await apiProjectUpdateTask(Number(taskId), { status });
+        } else {
+          await apiUpdateTask(id, { status });
+        }
+        setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, status } : t)));
+      } catch (error: any) {
+        toast({
+          title: "Не удалось обновить статус",
+          description: error?.message ?? "",
+          variant: "destructive",
+        });
+        await loadTasks();
+      }
+    },
+    [teamKanbanItems, toast],
+  );
+
+  const onTeamKanbanDocs = useCallback(
+    async (taskId: string | number, documentation: string | null) => {
+      const id = String(taskId);
+      const row = teamKanbanItems.find((t) => String(t.id) === id);
+      if (row?.readOnly) {
+        toast({ title: "Нет прав редактировать документацию", variant: "destructive" });
+        return;
+      }
+      try {
+        if (row?.projectId != null) {
+          await apiProjectUpdateTask(Number(taskId), { documentation });
+        } else {
+          await apiUpdateTask(id, { documentation });
+        }
+        setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, documentation } : t)));
+        toast({ title: "Документация сохранена" });
+      } catch (error: any) {
+        toast({ title: "Ошибка сохранения", description: error?.message ?? "", variant: "destructive" });
+      }
+    },
+    [teamKanbanItems, toast],
+  );
+
   return (
     <div className="min-h-screen p-4 lg:p-8">
-      <div className={`max-w-6xl mx-auto transition-all duration-300 ${isChatOpen ? "lg:mr-80 xl:mr-96" : ""}`}>
+      <div
+        className={cn(
+          "mx-auto transition-all duration-300 w-full",
+          isChatOpen ? "lg:mr-80 xl:mr-96" : "",
+          taskScope === "team" ? "max-w-[min(100%,1820px)]" : "max-w-6xl",
+        )}
+      >
         {/* Header */}
         <header className="mb-8 animate-fade-in -mt-2">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
@@ -346,6 +447,9 @@ const Index = () => {
                     </SheetContent>
                   </Sheet>
                 )}
+                <Button variant="outline" size="sm" onClick={() => navigate("/projects")}>
+                  Проекты
+                </Button>
                 {profile?.role === "admin" && (
                   <Button
                     variant="outline"
@@ -461,70 +565,98 @@ const Index = () => {
         {/* Tasks Section */}
         <Card className="glass-effect shadow-card">
           <div className="p-6">
-            <Tabs value={filter} onValueChange={(value: any) => setFilter(value)}>
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-                <div className="flex flex-col gap-2">
-                  <h2 className="text-2xl font-semibold">
-                    {taskScope === "personal" ? "Личные задачи" : "Командные задачи"}
-                  </h2>
-                  <div className="inline-flex gap-2">
-                    <Button
-                      type="button"
-                      variant={taskScope === "personal" ? "default" : "outline"}
-                      size="sm"
-                      onClick={() => setTaskScope("personal")}
-                    >
-                      Личные
-                    </Button>
-                    <Button
-                      type="button"
-                      variant={taskScope === "team" ? "default" : "outline"}
-                      size="sm"
-                      onClick={() => setTaskScope("team")}
-                    >
-                      Команда
-                    </Button>
-                  </div>
-                </div>
-                <div className="w-full sm:w-auto overflow-x-auto">
-                  <TabsList className="grid grid-cols-3 sm:inline-flex min-w-[360px]">
-                    <TabsTrigger value="all">Все ({stats.total})</TabsTrigger>
-                    <TabsTrigger value="pending">Активные ({stats.pending})</TabsTrigger>
-                    <TabsTrigger value="completed">Готовые ({stats.completed})</TabsTrigger>
-                  </TabsList>
-                </div>
-              </div>
-
-              <TabsContent value={filter} className="space-y-4">
-                {filteredTasks.length > 0 ? (
-                  filteredTasks.map((task, index) => (
-                    <div 
-                      key={task.id}
-                      style={{ animationDelay: `${index * 100}ms` }}
-                    >
-                      <TaskCard
-                        task={task}
-                        onToggleComplete={toggleTaskComplete}
-                        onDelete={deleteTask}
-                        onUpdateTask={updateTask}
-                      />
+            {taskScope === "team" ? (
+              <>
+                <div className="flex flex-col gap-4 mb-6">
+                  <div className="flex flex-col gap-2">
+                    <h2 className="text-2xl font-semibold">Командные задачи</h2>
+                    <p className="text-sm text-muted-foreground max-w-3xl">
+                      Канбан: задачи «Команда» с главной и назначенные вам из проектов. Перетаскивайте карточки между
+                      колонками (права как в проекте). Документация — кнопка «Доки».
+                    </p>
+                    <div className="inline-flex gap-2">
+                      <Button type="button" variant="outline" size="sm" onClick={() => setTaskScope("personal")}>
+                        Личные
+                      </Button>
+                      <Button type="button" variant="default" size="sm" onClick={() => setTaskScope("team")}>
+                        Команда
+                      </Button>
                     </div>
-                  ))
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Всего на доске: {teamKanbanItems.length} · активных: {scopeTasks.filter((t) => !t.completed).length}
+                  </p>
+                </div>
+                {teamKanbanItems.length > 0 ? (
+                  <KanbanBoard
+                    wide
+                    tasks={teamKanbanItems}
+                    onStatusChange={onTeamKanbanStatus}
+                    onSaveDocumentation={onTeamKanbanDocs}
+                  />
                 ) : (
                   <div className="text-center py-12 text-muted-foreground">
                     <Calendar className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                    <p className="text-lg mb-2">
-                      {filter === "completed" ? "Нет выполненных задач" :
-                       filter === "pending" ? "Нет активных задач" :
-                       "Пока нет задач"}
-                    </p>
+                    <p className="text-lg mb-2">Пока нет командных задач</p>
                     <p className="text-sm">
-                      {filter === "all" ? "Добавьте первую задачу выше" : "Попробуйте изменить фильтр"}
+                      Создайте задачу с категорией «Команда» или дождитесь назначения из проекта
                     </p>
                   </div>
                 )}
-              </TabsContent>
-            </Tabs>
+              </>
+            ) : (
+              <Tabs value={filter} onValueChange={(value: any) => setFilter(value)}>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+                  <div className="flex flex-col gap-2">
+                    <h2 className="text-2xl font-semibold">Личные задачи</h2>
+                    <div className="inline-flex gap-2">
+                      <Button type="button" variant="default" size="sm" onClick={() => setTaskScope("personal")}>
+                        Личные
+                      </Button>
+                      <Button type="button" variant="outline" size="sm" onClick={() => setTaskScope("team")}>
+                        Команда
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="w-full sm:w-auto overflow-x-auto">
+                    <TabsList className="grid grid-cols-3 sm:inline-flex min-w-[360px]">
+                      <TabsTrigger value="all">Все ({stats.total})</TabsTrigger>
+                      <TabsTrigger value="pending">Активные ({stats.pending})</TabsTrigger>
+                      <TabsTrigger value="completed">Готовые ({stats.completed})</TabsTrigger>
+                    </TabsList>
+                  </div>
+                </div>
+
+                <TabsContent value={filter} className="space-y-4">
+                  {filteredTasks.length > 0 ? (
+                    filteredTasks.map((task, index) => (
+                      <div key={task.id} style={{ animationDelay: `${index * 100}ms` }}>
+                        <TaskCard
+                          task={task}
+                          onToggleComplete={toggleTaskComplete}
+                          onDelete={deleteTask}
+                          onUpdateTask={updateTask}
+                        />
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-center py-12 text-muted-foreground">
+                      <Calendar className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                      <p className="text-lg mb-2">
+                        {filter === "completed"
+                          ? "Нет выполненных задач"
+                          : filter === "pending"
+                            ? "Нет активных задач"
+                            : "Пока нет задач"}
+                      </p>
+                      <p className="text-sm">
+                        {filter === "all" ? "Добавьте первую задачу выше" : "Попробуйте изменить фильтр"}
+                      </p>
+                    </div>
+                  )}
+                </TabsContent>
+              </Tabs>
+            )}
           </div>
         </Card>
 

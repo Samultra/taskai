@@ -24,6 +24,7 @@ router.get("/overview", requireAdmin, async (_req, res) => {
       query(
         `SELECT id, email, full_name, role_requested, status, created_at
          FROM registration_requests
+         WHERE status = 'pending'
          ORDER BY created_at DESC`,
       ),
       query(
@@ -181,6 +182,51 @@ router.post("/departments", requireAdmin, async (req, res) => {
   }
 });
 
+router.put("/departments/:id", requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, description } = req.body || {};
+    if (!name || !String(name).trim()) {
+      return res.status(400).json({ error: "name is required" });
+    }
+    const result = await query(
+      `UPDATE departments SET name = $1, description = $2 WHERE id = $3 RETURNING id, name, description`,
+      [String(name).trim(), description?.trim() || null, id],
+    );
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: "Department not found" });
+    }
+    await query(
+      `INSERT INTO activity_logs (actor_id, actor_email, action, target_type, target_id, details)
+       VALUES ($1, $2, 'admin_update_department', 'department', $3, $4::jsonb)`,
+      [req.user.id, req.user.email, String(id), JSON.stringify({ name: result.rows[0].name })],
+    );
+    res.json({ department: result.rows[0] });
+  } catch (err) {
+    console.error("Admin update department error", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.delete("/departments/:id", requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const del = await query(`DELETE FROM departments WHERE id = $1`, [id]);
+    if (del.rowCount === 0) {
+      return res.status(404).json({ error: "Department not found" });
+    }
+    await query(
+      `INSERT INTO activity_logs (actor_id, actor_email, action, target_type, target_id, details)
+       VALUES ($1, $2, 'admin_delete_department', 'department', $3, '{}'::jsonb)`,
+      [req.user.id, req.user.email, String(id)],
+    );
+    res.status(204).send();
+  } catch (err) {
+    console.error("Admin delete department error", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 router.post("/projects", requireAdmin, async (req, res) => {
   try {
     const { name, code, description, color, owner_profile_id } = req.body || {};
@@ -194,6 +240,65 @@ router.post("/projects", requireAdmin, async (req, res) => {
     res.status(201).json({ project: result.rows[0] });
   } catch (err) {
     console.error("Admin create project error", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.put("/projects/:id", requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, code, description, color, owner_profile_id } = req.body || {};
+    if (!name || !String(name).trim()) {
+      return res.status(400).json({ error: "name is required" });
+    }
+    const result = await query(
+      `UPDATE projects
+       SET name = $1,
+           code = $2,
+           description = $3,
+           color = $4,
+           owner_profile_id = $5
+       WHERE id = $6
+       RETURNING id, name, code, description, color, owner_profile_id, is_archived, created_at`,
+      [
+        String(name).trim(),
+        code?.trim() || null,
+        description?.trim() || null,
+        color || null,
+        owner_profile_id || null,
+        id,
+      ],
+    );
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+    await query(
+      `INSERT INTO activity_logs (actor_id, actor_email, action, target_type, target_id, details)
+       VALUES ($1, $2, 'admin_update_project', 'project', $3, $4::jsonb)`,
+      [req.user.id, req.user.email, String(id), JSON.stringify({ name: result.rows[0].name })],
+    );
+    res.json({ project: result.rows[0] });
+  } catch (err) {
+    console.error("Admin update project error", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.delete("/projects/:id", requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const del = await query(`DELETE FROM projects WHERE id = $1`, [id]);
+    if (del.rowCount === 0) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+    await query(
+      `INSERT INTO activity_logs (actor_id, actor_email, action, target_type, target_id, details)
+       VALUES ($1, $2, 'admin_delete_project', 'project', $3, '{}'::jsonb)`,
+      [req.user.id, req.user.email, String(id)],
+    );
+    res.status(204).send();
+  } catch (err) {
+    console.error("Admin delete project error", err);
     res.status(500).json({ error: "Internal server error" });
   }
 });

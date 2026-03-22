@@ -65,3 +65,16 @@ FROM (
     (SELECT user_id FROM ids)
 ) s
 WHERE NOT EXISTS (SELECT 1 FROM projects p WHERE p.code = s.code);
+
+-- 4) Проект ↔ отдел: участники отдела видят проект в списке (без отдельного project_members)
+INSERT INTO project_departments (project_id, department_id)
+SELECT p.id, d.id
+FROM projects p
+INNER JOIN departments d ON (
+  (p.code = 'CORE' AND d.name = 'Разработка') OR
+  (p.code = 'MKT' AND d.name = 'Маркетинг') OR
+  (p.code = 'CRM' AND d.name = 'Продажи') OR
+  (p.code = 'HRM' AND d.name = 'HR') OR
+  (p.code = 'SUP' AND d.name = 'Поддержка')
+)
+ON CONFLICT DO NOTHING;

@@ -19,6 +19,8 @@ import {
   apiModeratorRemoveMember,
   apiModeratorUpdateTask,
   apiModeratorHandleDeptJoinRequest,
+  apiProjectCreateTask,
+  apiProjectDeleteTask,
 } from "@/lib/api";
 
 interface RegistrationRequest {
@@ -91,6 +93,8 @@ const ModeratorDashboard = () => {
   const [loading, setLoading] = useState(false);
   const [memberEmailByProject, setMemberEmailByProject] = useState<Record<number, string>>({});
   const [deptRequests, setDeptRequests] = useState<DepartmentJoinRequest[]>([]);
+  const [newTaskProjectId, setNewTaskProjectId] = useState<string>("");
+  const [newTaskTitle, setNewTaskTitle] = useState("");
 
   const loadAll = async () => {
     setLoading(true);
@@ -171,7 +175,8 @@ const ModeratorDashboard = () => {
   };
 
   const handleUserBlockToggle = async (user: Profile) => {
-    const nextBlocked = !user.is_blocked;
+    const currentlyBlocked = Boolean(user.is_blocked);
+    const nextBlocked = !currentlyBlocked;
     try {
       await apiModeratorBlockUser(user.id, nextBlocked);
       setUsers((prev) => prev.map((u) => (u.id === user.id ? { ...u, is_blocked: nextBlocked } : u)));
@@ -257,6 +262,56 @@ const ModeratorDashboard = () => {
       toast({
         title: "Ошибка обработки заявки отдела",
         description: error?.message ?? "Не удалось обработать заявку",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleCreateTask = async () => {
+    const projectId = Number(newTaskProjectId);
+    if (!Number.isFinite(projectId) || !newTaskTitle.trim()) {
+      toast({
+        title: "Нужны проект и название",
+        description: "Выберите проект из списка и введите заголовок задачи.",
+        variant: "destructive",
+      });
+      return;
+    }
+    try {
+      const task = await apiProjectCreateTask(projectId, { title: newTaskTitle.trim() });
+      setTasks((prev) => [
+        ...prev,
+        {
+          id: task.id,
+          project_id: task.project_id ?? projectId,
+          title: task.title,
+          status: task.status as TaskStatus,
+          priority: (task.priority as "low" | "medium" | "high") || "medium",
+          due_date: task.due_date ?? null,
+          assignee_profile_id: task.assignee_profile_id ?? null,
+        },
+      ]);
+      setNewTaskTitle("");
+      toast({ title: "Задача создана" });
+    } catch (error: any) {
+      toast({
+        title: "Не удалось создать задачу",
+        description: error?.message ?? "",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleDeleteTask = async (taskId: number) => {
+    if (!window.confirm("Удалить эту задачу?")) return;
+    try {
+      await apiProjectDeleteTask(taskId);
+      setTasks((prev) => prev.filter((t) => t.id !== taskId));
+      toast({ title: "Задача удалена" });
+    } catch (error: any) {
+      toast({
+        title: "Ошибка удаления задачи",
+        description: error?.message ?? "",
         variant: "destructive",
       });
     }
@@ -434,6 +489,41 @@ const ModeratorDashboard = () => {
             <h2 className="font-semibold">Задачи моих проектов</h2>
             <Badge variant="outline">{tasks.length}</Badge>
           </div>
+          <div className="flex flex-col sm:flex-row gap-2 sm:items-end flex-wrap">
+            <div className="space-y-1 flex-1 min-w-[180px]">
+              <label className="text-[11px] text-muted-foreground">Проект</label>
+              <Select value={newTaskProjectId || undefined} onValueChange={setNewTaskProjectId}>
+                <SelectTrigger className="h-9 text-xs">
+                  <SelectValue placeholder="Выберите проект" />
+                </SelectTrigger>
+                <SelectContent>
+                  {projects.map((p) => (
+                    <SelectItem key={p.id} value={String(p.id)}>
+                      {p.code || p.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1 flex-[2] min-w-[200px]">
+              <label className="text-[11px] text-muted-foreground">Название задачи</label>
+              <Input
+                className="h-9 text-xs"
+                value={newTaskTitle}
+                placeholder="Новая задача…"
+                onChange={(e) => setNewTaskTitle(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleCreateTask();
+                  }
+                }}
+              />
+            </div>
+            <Button size="sm" className="h-9" type="button" disabled={!projects.length} onClick={handleCreateTask}>
+              Создать задачу
+            </Button>
+          </div>
           <Table>
             <TableHeader>
               <TableRow>
@@ -442,6 +532,7 @@ const ModeratorDashboard = () => {
                 <TableHead>Статус</TableHead>
                 <TableHead>Дедлайн</TableHead>
                 <TableHead>Исполнитель</TableHead>
+                <TableHead className="w-[90px] text-right">Действия</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -490,11 +581,24 @@ const ModeratorDashboard = () => {
                       </SelectContent>
                     </Select>
                   </TableCell>
+                  <TableCell className="text-right">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 text-xs text-destructive hover:text-destructive"
+                      onClick={() => handleDeleteTask(t.id)}
+                    >
+                      Удалить
+                    </Button>
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
             <TableCaption>
-              {tasks.length ? "Быстрое управление задачами проектов (статус/дедлайн/исполнитель)." : "Пока нет задач."}
+              {tasks.length
+                ? "Создание, редактирование и удаление задач в ваших проектах."
+                : "Пока нет задач — создайте первую формой выше."}
             </TableCaption>
           </Table>
         </Card>
@@ -524,40 +628,58 @@ const ModeratorDashboard = () => {
                     </div>
                   </TableCell>
                   <TableCell className="text-xs">
-                    <Input
-                      className="h-8 text-xs"
-                      defaultValue={u.full_name ?? ""}
-                      placeholder="Имя пользователя"
-                      onBlur={(e) => {
-                        if (e.target.value !== (u.full_name ?? "")) {
-                          handleUserNameChange(u.id, e.target.value);
-                        }
-                      }}
-                    />
+                    {u.role === "admin" ? (
+                      <span className="text-muted-foreground">{u.full_name ?? "—"}</span>
+                    ) : (
+                      <Input
+                        className="h-8 text-xs"
+                        defaultValue={u.full_name ?? ""}
+                        placeholder="Имя пользователя"
+                        onBlur={(e) => {
+                          if (e.target.value !== (u.full_name ?? "")) {
+                            handleUserNameChange(u.id, e.target.value);
+                          }
+                        }}
+                      />
+                    )}
                   </TableCell>
                   <TableCell className="text-xs">
-                    <Select
-                      value={u.role}
-                      onValueChange={(value: AppRole) => handleUserRoleChange(u.id, value)}
-                    >
-                      <SelectTrigger className="w-[120px] h-8 text-xs">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="user">user</SelectItem>
-                        <SelectItem value="moderator">moderator</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    {u.role === "admin" ? (
+                      <Badge variant="secondary" className="text-[10px]">
+                        admin
+                      </Badge>
+                    ) : (
+                      <Select
+                        value={u.role}
+                        onValueChange={(value: AppRole) => handleUserRoleChange(u.id, value)}
+                      >
+                        <SelectTrigger className="w-[120px] h-8 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="user">user</SelectItem>
+                          <SelectItem value="moderator">moderator</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    )}
                   </TableCell>
                   <TableCell className="text-xs">
-                    <Button
-                      size="sm"
-                      variant={u.is_blocked ? "default" : "outline"}
-                      className="h-8 px-2 text-xs"
-                      onClick={() => handleUserBlockToggle(u)}
-                    >
-                      {u.is_blocked ? "Разблокировать" : "Заблокировать"}
-                    </Button>
+                    <div className="flex flex-col gap-1 items-start">
+                      {Boolean(u.is_blocked) && (
+                        <Badge variant="destructive" className="text-[10px]">
+                          BLOCKED
+                        </Badge>
+                      )}
+                      <Button
+                        size="sm"
+                        variant={Boolean(u.is_blocked) ? "default" : "outline"}
+                        className="h-8 px-2 text-xs"
+                        disabled={u.role === "admin" && !Boolean(u.is_blocked)}
+                        onClick={() => handleUserBlockToggle(u)}
+                      >
+                        {Boolean(u.is_blocked) ? "Разблокировать" : "Заблокировать"}
+                      </Button>
+                    </div>
                   </TableCell>
                   <TableCell className="text-xs">
                     {u.created_at ? new Date(u.created_at).toLocaleString("ru-RU") : "—"}
@@ -566,8 +688,8 @@ const ModeratorDashboard = () => {
               ))}
             </TableBody>
             <TableCaption>
-              Модератор может менять имя, роль (user/moderator) и блокировать аккаунты. Роль admin доступна только в
-              админ-панели.
+              Модератор меняет имя и роль (user/moderator), блокирует пользователей. Администраторов и их блокировку
+              меняет только админ.
             </TableCaption>
           </Table>
         </Card>

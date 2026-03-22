@@ -47,7 +47,9 @@ async function apiFetch<T>(path: string, options: ApiOptions = {}): Promise<T> {
     throw new Error(msg || `Request failed with status ${res.status}`);
   }
 
-  return (await res.json()) as T;
+  const text = await res.text();
+  if (!text) return undefined as T;
+  return JSON.parse(text) as T;
 }
 
 export interface ApiProfile {
@@ -188,6 +190,22 @@ export async function apiAdminCreateDepartment(payload: { name: string; descript
   return data.department;
 }
 
+export async function apiAdminUpdateDepartment(id: number, payload: { name: string; description?: string | null }) {
+  const data = await apiFetch<{ department: any }>("/admin/departments/" + id, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+    auth: true,
+  });
+  return data.department;
+}
+
+export async function apiAdminDeleteDepartment(id: number) {
+  await apiFetch<void>("/admin/departments/" + id, {
+    method: "DELETE",
+    auth: true,
+  });
+}
+
 export async function apiAdminCreateProject(payload: {
   name: string;
   code?: string | null;
@@ -201,6 +219,31 @@ export async function apiAdminCreateProject(payload: {
     auth: true,
   });
   return data.project;
+}
+
+export async function apiAdminUpdateProject(
+  projectId: number,
+  payload: {
+    name: string;
+    code?: string | null;
+    description?: string | null;
+    color?: string | null;
+    owner_profile_id?: string | null;
+  },
+) {
+  const data = await apiFetch<{ project: any }>("/admin/projects/" + projectId, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+    auth: true,
+  });
+  return data.project;
+}
+
+export async function apiAdminDeleteProject(projectId: number) {
+  await apiFetch<void>("/admin/projects/" + projectId, {
+    method: "DELETE",
+    auth: true,
+  });
 }
 
 export async function apiAdminToggleArchiveProject(projectId: number, isArchived: boolean) {
@@ -259,6 +302,7 @@ export async function apiModeratorOverview() {
     members: any[];
     tasks: any[];
     users: any[];
+    departmentJoinRequests: any[];
   }>("/moderator/overview", { auth: true });
 }
 
@@ -342,8 +386,18 @@ export async function apiModeratorUpdateTask(
 
 // Project tasks APIs
 
+export async function apiProjectList() {
+  return apiFetch<{ projects: any[] }>("/projects", { auth: true });
+}
+
 export async function apiProjectDetail(projectId: number) {
-  return apiFetch<{ project: any; users: any[]; tasks: any[] }>(`/projects/${projectId}/detail`, { auth: true });
+  return apiFetch<{
+    project: any;
+    members: any[];
+    tasks: any[];
+    /** Только для admin: все незаблокированные профили для поля «Назначен». */
+    assigneeProfiles?: { id: string; email: string; full_name?: string | null }[];
+  }>(`/projects/${projectId}/detail`, { auth: true });
 }
 
 export async function apiProjectCreateTask(projectId: number, payload: any) {

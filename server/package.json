@@ -7,7 +7,9 @@
   "scripts": {
     "dev": "node src/index.js",
     "start": "NODE_ENV=production node src/index.js",
-    "seed:users": "node scripts/create-test-users.js"
+    "seed:users": "node scripts/create-test-users.js",
+    "fix:project-text": "node scripts/fix-project-descriptions.js",
+    "link:projects-depts": "node scripts/link-projects-to-departments.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

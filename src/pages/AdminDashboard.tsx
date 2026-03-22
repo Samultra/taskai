@@ -1,12 +1,23 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth, AppRole, Profile } from "@/hooks/useAuth";
 import {
@@ -16,7 +27,11 @@ import {
   apiAdminUpdateUserName,
   apiAdminHandleRequest,
   apiAdminCreateDepartment,
+  apiAdminUpdateDepartment,
+  apiAdminDeleteDepartment,
   apiAdminCreateProject,
+  apiAdminUpdateProject,
+  apiAdminDeleteProject,
   apiAdminToggleArchiveProject,
   apiAdminAddMemberToProject,
   apiAdminRemoveMemberFromProject,
@@ -60,6 +75,14 @@ interface Project {
   created_at: string;
 }
 
+interface ProjectEditForm {
+  name: string;
+  code: string;
+  description: string;
+  color: string;
+  owner_profile_id: string;
+}
+
 interface ProjectMember {
   project_id: number;
   profile_id: string;
@@ -89,6 +112,21 @@ const AdminDashboard = () => {
   const [newProjectCode, setNewProjectCode] = useState("");
   const [newProjectColor, setNewProjectColor] = useState("#4f46e5");
   const [newProjectOwnerId, setNewProjectOwnerId] = useState<string>("");
+  const [deptDrafts, setDeptDrafts] = useState<Record<number, { name: string; description: string }>>({});
+  const [expandedProjectId, setExpandedProjectId] = useState<number | null>(null);
+  const [projectForm, setProjectForm] = useState<ProjectEditForm | null>(null);
+  const [memberEmailByProject, setMemberEmailByProject] = useState<Record<number, string>>({});
+  const [deptAddForProject, setDeptAddForProject] = useState<Record<number, string>>({});
+  const [deptDeleteId, setDeptDeleteId] = useState<number | null>(null);
+  const [projectDeleteId, setProjectDeleteId] = useState<number | null>(null);
+
+  useEffect(() => {
+    setDeptDrafts(
+      Object.fromEntries(
+        departments.map((d) => [d.id, { name: d.name, description: d.description ?? "" }]),
+      ),
+    );
+  }, [departments]);
 
   const loadData = async () => {
     setLoading(true);
@@ -159,7 +197,8 @@ const AdminDashboard = () => {
   };
 
   const handleBlockToggle = async (user: Profile) => {
-    const nextBlocked = !user.is_blocked;
+    const currentlyBlocked = Boolean(user.is_blocked);
+    const nextBlocked = !currentlyBlocked;
     try {
       await apiAdminBlockUser(user.id, nextBlocked);
       setUsers((prev) => prev.map((u) => (u.id === user.id ? { ...u, is_blocked: nextBlocked } : u)));
@@ -283,6 +322,110 @@ const AdminDashboard = () => {
     }
   };
 
+  const handleSaveDepartment = async (departmentId: number) => {
+    const draft = deptDrafts[departmentId];
+    if (!draft?.name?.trim()) {
+      toast({ title: "Укажите название отдела", variant: "destructive" });
+      return;
+    }
+    try {
+      const updated = await apiAdminUpdateDepartment(departmentId, {
+        name: draft.name.trim(),
+        description: draft.description.trim() || null,
+      });
+      setDepartments((prev) => prev.map((d) => (d.id === departmentId ? (updated as Department) : d)));
+      toast({ title: "Отдел сохранён" });
+      loadData();
+    } catch (error: any) {
+      toast({ title: "Ошибка сохранения отдела", description: error?.message ?? "", variant: "destructive" });
+    }
+  };
+
+  const confirmDeleteDepartment = async () => {
+    if (deptDeleteId == null) return;
+    try {
+      await apiAdminDeleteDepartment(deptDeleteId);
+      setDepartments((prev) => prev.filter((d) => d.id !== deptDeleteId));
+      setProjectDepartments((prev) => prev.filter((pd) => pd.department_id !== deptDeleteId));
+      toast({ title: "Отдел удалён" });
+      setDeptDeleteId(null);
+      loadData();
+    } catch (error: any) {
+      toast({ title: "Ошибка удаления отдела", description: error?.message ?? "", variant: "destructive" });
+    }
+  };
+
+  const toggleProjectDetails = (p: Project) => {
+    if (expandedProjectId === p.id) {
+      setExpandedProjectId(null);
+      setProjectForm(null);
+    } else {
+      setExpandedProjectId(p.id);
+      setProjectForm({
+        name: p.name,
+        code: p.code ?? "",
+        description: p.description ?? "",
+        color: p.color ?? "#4f46e5",
+        owner_profile_id: p.owner_profile_id ?? "",
+      });
+    }
+  };
+
+  const handleSaveProjectDetails = async (projectId: number) => {
+    if (!projectForm?.name?.trim()) {
+      toast({ title: "Укажите название проекта", variant: "destructive" });
+      return;
+    }
+    try {
+      const updated = await apiAdminUpdateProject(projectId, {
+        name: projectForm.name.trim(),
+        code: projectForm.code.trim() || null,
+        description: projectForm.description.trim() || null,
+        color: projectForm.color || null,
+        owner_profile_id: projectForm.owner_profile_id || null,
+      });
+      setProjects((prev) => prev.map((p) => (p.id === projectId ? (updated as Project) : p)));
+      toast({ title: "Проект обновлён" });
+      loadData();
+    } catch (error: any) {
+      toast({ title: "Ошибка сохранения проекта", description: error?.message ?? "", variant: "destructive" });
+    }
+  };
+
+  const confirmDeleteProject = async () => {
+    if (projectDeleteId == null) return;
+    try {
+      await apiAdminDeleteProject(projectDeleteId);
+      setProjects((prev) => prev.filter((p) => p.id !== projectDeleteId));
+      setProjectMembers((prev) => prev.filter((pm) => pm.project_id !== projectDeleteId));
+      setProjectDepartments((prev) => prev.filter((pd) => pd.project_id !== projectDeleteId));
+      if (expandedProjectId === projectDeleteId) {
+        setExpandedProjectId(null);
+        setProjectForm(null);
+      }
+      toast({ title: "Проект удалён" });
+      setProjectDeleteId(null);
+      loadData();
+    } catch (error: any) {
+      toast({ title: "Ошибка удаления проекта", description: error?.message ?? "", variant: "destructive" });
+    }
+  };
+
+  const addMemberFromExpanded = async (projectId: number) => {
+    const email = (memberEmailByProject[projectId] ?? "").trim();
+    if (!email) return;
+    await handleAddMemberToProject(projectId, email);
+    setMemberEmailByProject((prev) => ({ ...prev, [projectId]: "" }));
+  };
+
+  const addDeptFromExpanded = async (projectId: number) => {
+    const raw = deptAddForProject[projectId];
+    const departmentId = raw ? Number(raw) : NaN;
+    if (!Number.isFinite(departmentId)) return;
+    await handleAddDepartmentToProject(projectId, departmentId);
+    setDeptAddForProject((prev) => ({ ...prev, [projectId]: "" }));
+  };
+
   return (
     <div className="min-h-screen p-4 lg:p-8">
       <div className="max-w-7xl mx-auto space-y-6">
@@ -373,18 +516,18 @@ const AdminDashboard = () => {
                             <Badge variant="outline" className="w-fit text-xs uppercase tracking-wide">
                               {u.role}
                             </Badge>
-                            {u.is_blocked && (
+                            {Boolean(u.is_blocked) && (
                               <Badge variant="destructive" className="w-fit text-xs uppercase tracking-wide">
                                 BLOCKED
                               </Badge>
                             )}
                             <Button
                               size="sm"
-                              variant={u.is_blocked ? "default" : "outline"}
+                              variant={Boolean(u.is_blocked) ? "default" : "outline"}
                               className="h-9 px-3 text-xs mt-1"
                               onClick={() => handleBlockToggle(u)}
                             >
-                              {u.is_blocked ? "Разблокировать" : "Заблокировать"}
+                              {Boolean(u.is_blocked) ? "Разблокировать" : "Заблокировать"}
                             </Button>
                           </div>
                         </TableCell>
@@ -512,20 +655,58 @@ const AdminDashboard = () => {
                     <TableRow>
                       <TableHead>Название</TableHead>
                       <TableHead>Описание</TableHead>
+                      <TableHead className="w-[220px] text-right">Действия</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody className="[&>tr>td]:py-3">
                     {departments.map((d) => (
                       <TableRow key={d.id}>
-                        <TableCell className="font-medium">{d.name}</TableCell>
-                        <TableCell className="text-base text-muted-foreground">
-                          {d.description || "—"}
+                        <TableCell>
+                          <Input
+                            className="h-9 text-base"
+                            value={deptDrafts[d.id]?.name ?? d.name}
+                            onChange={(e) =>
+                              setDeptDrafts((prev) => ({
+                                ...prev,
+                                [d.id]: {
+                                  name: e.target.value,
+                                  description: prev[d.id]?.description ?? d.description ?? "",
+                                },
+                              }))
+                            }
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Input
+                            className="h-9 text-base"
+                            placeholder="Описание"
+                            value={deptDrafts[d.id]?.description ?? d.description ?? ""}
+                            onChange={(e) =>
+                              setDeptDrafts((prev) => ({
+                                ...prev,
+                                [d.id]: {
+                                  name: prev[d.id]?.name ?? d.name,
+                                  description: e.target.value,
+                                },
+                              }))
+                            }
+                          />
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex flex-wrap gap-2 justify-end">
+                            <Button size="sm" variant="secondary" className="h-9" onClick={() => handleSaveDepartment(d.id)}>
+                              Сохранить
+                            </Button>
+                            <Button size="sm" variant="outline" className="h-9 text-destructive" onClick={() => setDeptDeleteId(d.id)}>
+                              Удалить
+                            </Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))}
                     {departments.length === 0 && (
                       <TableRow>
-                        <TableCell colSpan={2} className="text-base text-muted-foreground text-center py-6">
+                        <TableCell colSpan={3} className="text-base text-muted-foreground text-center py-6">
                           Пока нет отделов. Создайте первый выше.
                         </TableCell>
                       </TableRow>
@@ -604,57 +785,247 @@ const AdminDashboard = () => {
                       const ownerEmail = users.find((u) => u.id === p.owner_profile_id)?.email;
                       const members = projectMembers.filter((pm) => pm.project_id === p.id);
                       const projDepts = projectDepartments.filter((pd) => pd.project_id === p.id);
+                      const expanded = expandedProjectId === p.id;
+                      const availableDepts = departments.filter(
+                        (d) => !projDepts.some((pd) => pd.department_id === d.id),
+                      );
                       return (
-                        <TableRow key={p.id}>
-                          <TableCell>
-                            <div className="flex items-center gap-2">
-                              {p.color && (
-                                <span
-                                  className="h-4 w-4 rounded-full border"
-                                  style={{ backgroundColor: p.color }}
-                                />
-                              )}
-                              <div className="min-w-0">
-                                <p className="font-semibold truncate">
-                                  {p.name} {p.code ? `(${p.code})` : ""}
-                                </p>
-                                <p className="text-xs text-muted-foreground truncate">
-                                  ID: {p.id} • {new Date(p.created_at).toLocaleString("ru-RU")}
-                                </p>
-                                <p className="text-xs text-muted-foreground">
-                                  Участников: {members.length} • Отделов: {projDepts.length}
-                                </p>
+                        <Fragment key={p.id}>
+                          <TableRow>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                {p.color && (
+                                  <span
+                                    className="h-4 w-4 rounded-full border"
+                                    style={{ backgroundColor: p.color }}
+                                  />
+                                )}
+                                <div className="min-w-0">
+                                  <p className="font-semibold truncate">
+                                    {p.name} {p.code ? `(${p.code})` : ""}
+                                  </p>
+                                  <p className="text-xs text-muted-foreground truncate">
+                                    ID: {p.id} • {new Date(p.created_at).toLocaleString("ru-RU")}
+                                  </p>
+                                  <p className="text-xs text-muted-foreground">
+                                    Участников: {members.length} • Отделов: {projDepts.length}
+                                  </p>
+                                </div>
                               </div>
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <span className="text-sm text-muted-foreground">
-                              {ownerEmail ?? "не назначен"}
-                            </span>
-                          </TableCell>
-                          <TableCell>{members.length}</TableCell>
-                          <TableCell>{projDepts.length}</TableCell>
-                          <TableCell>
-                            <Badge variant={p.is_archived ? "outline" : "secondary"}>
-                              {p.is_archived ? "Архив" : "Активен"}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex flex-wrap gap-2 justify-end">
-                              <Button
-                                size="sm"
-                                variant={p.is_archived ? "outline" : "default"}
-                                className="h-8 px-3 text-xs"
-                                onClick={() => handleToggleArchiveProject(p)}
-                              >
-                                {p.is_archived ? "Разархивировать" : "Архивировать"}
-                              </Button>
-                              <Button asChild size="sm" variant="outline" className="h-8 px-3 text-xs">
-                                <Link to={`/projects/${p.id}`}>Задачи</Link>
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
+                            </TableCell>
+                            <TableCell>
+                              <span className="text-sm text-muted-foreground">
+                                {ownerEmail ?? "не назначен"}
+                              </span>
+                            </TableCell>
+                            <TableCell>{members.length}</TableCell>
+                            <TableCell>{projDepts.length}</TableCell>
+                            <TableCell>
+                              <Badge variant={p.is_archived ? "outline" : "secondary"}>
+                                {p.is_archived ? "Архив" : "Активен"}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex flex-wrap gap-2 justify-end">
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  className="h-8 px-3 text-xs"
+                                  onClick={() => toggleProjectDetails(p)}
+                                >
+                                  {expanded ? "Свернуть" : "Детали"}
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant={p.is_archived ? "outline" : "default"}
+                                  className="h-8 px-3 text-xs"
+                                  onClick={() => handleToggleArchiveProject(p)}
+                                >
+                                  {p.is_archived ? "Разархивировать" : "Архивировать"}
+                                </Button>
+                                <Button asChild size="sm" variant="outline" className="h-8 px-3 text-xs">
+                                  <Link to={`/projects/${p.id}`}>Задачи</Link>
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-8 px-3 text-xs text-destructive border-destructive/40"
+                                  onClick={() => setProjectDeleteId(p.id)}
+                                >
+                                  Удалить
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                          {expanded && projectForm && (
+                            <TableRow>
+                              <TableCell colSpan={6} className="align-top bg-muted/20 border-t">
+                                <div className="space-y-4 py-2 text-sm">
+                                  <p className="font-medium text-base">Редактирование и доступы</p>
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                    <div className="space-y-1">
+                                      <label className="text-xs text-muted-foreground">Название</label>
+                                      <Input
+                                        className="h-9"
+                                        value={projectForm.name}
+                                        onChange={(e) => setProjectForm((f) => (f ? { ...f, name: e.target.value } : f))}
+                                      />
+                                    </div>
+                                    <div className="space-y-1">
+                                      <label className="text-xs text-muted-foreground">Код</label>
+                                      <Input
+                                        className="h-9"
+                                        value={projectForm.code}
+                                        onChange={(e) => setProjectForm((f) => (f ? { ...f, code: e.target.value } : f))}
+                                      />
+                                    </div>
+                                    <div className="space-y-1 md:col-span-2">
+                                      <label className="text-xs text-muted-foreground">Описание</label>
+                                      <Textarea
+                                        className="min-h-[72px] text-sm"
+                                        value={projectForm.description}
+                                        onChange={(e) =>
+                                          setProjectForm((f) => (f ? { ...f, description: e.target.value } : f))
+                                        }
+                                      />
+                                    </div>
+                                    <div className="space-y-1">
+                                      <label className="text-xs text-muted-foreground">Цвет</label>
+                                      <Input
+                                        type="color"
+                                        className="h-9 w-full max-w-[120px]"
+                                        value={projectForm.color}
+                                        onChange={(e) => setProjectForm((f) => (f ? { ...f, color: e.target.value } : f))}
+                                      />
+                                    </div>
+                                    <div className="space-y-1">
+                                      <label className="text-xs text-muted-foreground">Владелец</label>
+                                      <Select
+                                        value={projectForm.owner_profile_id || "none"}
+                                        onValueChange={(v) =>
+                                          setProjectForm((f) => (f ? { ...f, owner_profile_id: v === "none" ? "" : v } : f))
+                                        }
+                                      >
+                                        <SelectTrigger className="h-9">
+                                          <SelectValue placeholder="Не назначен" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          <SelectItem value="none">Не назначен</SelectItem>
+                                          {users.map((u) => (
+                                            <SelectItem key={u.id} value={u.id}>
+                                              {u.email}
+                                            </SelectItem>
+                                          ))}
+                                        </SelectContent>
+                                      </Select>
+                                    </div>
+                                  </div>
+                                  <Button size="sm" className="h-9" onClick={() => handleSaveProjectDetails(p.id)}>
+                                    Сохранить изменения проекта
+                                  </Button>
+
+                                  <div className="border-t pt-3 space-y-2">
+                                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                                      Участники проекта
+                                    </p>
+                                    <div className="flex flex-wrap gap-2">
+                                      {members.map((m) => (
+                                        <Badge key={m.profile_id} variant="outline" className="gap-1 pl-2 pr-1">
+                                          {users.find((u) => u.id === m.profile_id)?.email ?? m.profile_id.slice(0, 8)}
+                                          <button
+                                            type="button"
+                                            className="rounded px-1 hover:bg-muted"
+                                            onClick={() => handleRemoveMemberFromProject(p.id, m.profile_id)}
+                                            aria-label="Удалить участника"
+                                          >
+                                            ×
+                                          </button>
+                                        </Badge>
+                                      ))}
+                                      {members.length === 0 && (
+                                        <span className="text-xs text-muted-foreground">Пока никого нет</span>
+                                      )}
+                                    </div>
+                                    <div className="flex flex-col sm:flex-row gap-2 sm:items-center max-w-md">
+                                      <Input
+                                        className="h-9 flex-1"
+                                        placeholder="Email пользователя"
+                                        value={memberEmailByProject[p.id] ?? ""}
+                                        onChange={(e) =>
+                                          setMemberEmailByProject((prev) => ({ ...prev, [p.id]: e.target.value }))
+                                        }
+                                        onKeyDown={(e) => {
+                                          if (e.key === "Enter") {
+                                            e.preventDefault();
+                                            addMemberFromExpanded(p.id);
+                                          }
+                                        }}
+                                      />
+                                      <Button size="sm" variant="outline" className="h-9" type="button" onClick={() => addMemberFromExpanded(p.id)}>
+                                        Добавить участника
+                                      </Button>
+                                    </div>
+                                  </div>
+
+                                  <div className="border-t pt-3 space-y-2">
+                                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                                      Отделы в проекте
+                                    </p>
+                                    <div className="flex flex-wrap gap-2">
+                                      {projDepts.map((pd) => (
+                                        <Badge key={pd.department_id} variant="secondary" className="gap-1 pl-2 pr-1">
+                                          {departmentsById[pd.department_id]?.name ?? pd.department_id}
+                                          <button
+                                            type="button"
+                                            className="rounded px-1 hover:bg-muted"
+                                            onClick={() =>
+                                              handleRemoveDepartmentFromProject(p.id, pd.department_id)
+                                            }
+                                            aria-label="Отвязать отдел"
+                                          >
+                                            ×
+                                          </button>
+                                        </Badge>
+                                      ))}
+                                      {projDepts.length === 0 && (
+                                        <span className="text-xs text-muted-foreground">Отделы не привязаны</span>
+                                      )}
+                                    </div>
+                                    <div className="flex flex-col sm:flex-row gap-2 sm:items-center max-w-md">
+                                      <Select
+                                        value={deptAddForProject[p.id] ?? ""}
+                                        onValueChange={(v) =>
+                                          setDeptAddForProject((prev) => ({ ...prev, [p.id]: v }))
+                                        }
+                                      >
+                                        <SelectTrigger className="h-9 flex-1">
+                                          <SelectValue placeholder="Выберите отдел" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          {availableDepts.map((d) => (
+                                            <SelectItem key={d.id} value={String(d.id)}>
+                                              {d.name}
+                                            </SelectItem>
+                                          ))}
+                                        </SelectContent>
+                                      </Select>
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="h-9"
+                                        type="button"
+                                        disabled={!deptAddForProject[p.id] || availableDepts.length === 0}
+                                        onClick={() => addDeptFromExpanded(p.id)}
+                                      >
+                                        Привязать отдел
+                                      </Button>
+                                    </div>
+                                  </div>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          )}
+                        </Fragment>
                       );
                     })}
                     {projects.length === 0 && (
@@ -720,6 +1091,40 @@ const AdminDashboard = () => {
             </Card>
           </TabsContent>
         </Tabs>
+
+        <AlertDialog open={deptDeleteId != null} onOpenChange={(open) => !open && setDeptDeleteId(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Удалить отдел?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Будут удалены связи отдела с проектами и данные участников этого отдела. Действие необратимо.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Отмена</AlertDialogCancel>
+              <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={confirmDeleteDepartment}>
+                Удалить
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        <AlertDialog open={projectDeleteId != null} onOpenChange={(open) => !open && setProjectDeleteId(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Удалить проект?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Все задачи и связи проекта будут удалены. Действие необратимо.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Отмена</AlertDialogCancel>
+              <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={confirmDeleteProject}>
+                Удалить
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </div>
   );

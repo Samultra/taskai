@@ -61,12 +61,23 @@ CREATE TABLE IF NOT EXISTS project_departments (
   PRIMARY KEY (project_id, department_id)
 );
 
-CREATE TYPE task_status AS ENUM ('todo', 'in_progress', 'done', 'blocked');
+CREATE TYPE task_status AS ENUM (
+  'backlog',
+  'analytics',
+  'ready_for_dev',
+  'testing',
+  'release_ready',
+  'todo',
+  'in_progress',
+  'done',
+  'blocked'
+);
 
 CREATE TABLE IF NOT EXISTS tasks (
   id BIGSERIAL PRIMARY KEY,
   title TEXT NOT NULL,
   description TEXT,
+  documentation TEXT,
   completed BOOLEAN NOT NULL DEFAULT FALSE,
   priority TEXT NOT NULL DEFAULT 'medium',
   category TEXT,

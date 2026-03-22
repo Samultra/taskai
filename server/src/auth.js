@@ -97,6 +97,7 @@ router.post("/login", async (req, res) => {
     }
 
     delete profile.password_hash;
+    profile.is_blocked = Boolean(profile.is_blocked);
 
     const token = signToken({ id: profile.id, email: profile.email, role: profile.role });
 
@@ -125,7 +126,9 @@ router.get("/me", authMiddleware, async (req, res) => {
       return res.status(404).json({ error: "Profile not found" });
     }
 
-    return res.json({ profile: result.rows[0] });
+    const profile = result.rows[0];
+    profile.is_blocked = Boolean(profile.is_blocked);
+    return res.json({ profile });
   } catch (err) {
     console.error("Me error", err);
     return res.status(500).json({ error: "Internal server error" });
