@@ -51,6 +51,8 @@ jobs:
         with:
           path: dist
 
+  # Если деплой отклонён: Settings → Environments → github-pages → Deployment branches
+  # разреши ветку main (или «All branches»), либо сними required reviewers.
   deploy:
     environment:
       name: github-pages
