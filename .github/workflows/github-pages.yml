@@ -1,6 +1,11 @@
-# Сборка фронта и публикация на GitHub Pages (ветка gh-pages).
-# URL приложения: https://samultra.github.io/taskai/
-# В настройках репозитория → Secrets → Actions добавь VITE_API_URL (URL API на Render, с /api в конце).
+# Публикует dist на GitHub Pages (URL: https://<user>.github.io/taskai/)
+#
+# Один раз в репозитории:
+# 1) Settings → Secrets → Actions: VITE_API_URL = https://taskai-lxtd.onrender.com/api
+#    (опционально VITE_OPENROUTER_* для чата)
+# 2) Settings → Pages → Source: GitHub Actions
+# 3) Settings → Environments → github-pages → Deployment branches: разреши main (или All branches)
+# 4) Render → FRONTEND_ORIGIN должен включать https://samultra.github.io (и при желании localhost)
 
 name: Deploy to GitHub Pages
 
