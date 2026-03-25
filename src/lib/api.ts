@@ -181,6 +181,44 @@ export async function apiAdminHandleRequest(id: number, action: "approve" | "rej
   });
 }
 
+export async function apiAdminCreateUser(payload: {
+  email: string;
+  password: string;
+  full_name?: string | null;
+  requestedRole?: string;
+}) {
+  const data = await apiFetch<{ profile: any; request_id: number | null }>("/admin/users", {
+    method: "POST",
+    body: JSON.stringify(payload),
+    auth: true,
+  });
+  return data;
+}
+
+export async function apiAdminCreateRoleRequest(payload: {
+  email: string;
+  full_name?: string | null;
+  role_requested: string;
+}) {
+  const data = await apiFetch<{ ok: boolean; id: number | null }>("/admin/requests", {
+    method: "POST",
+    body: JSON.stringify(payload),
+    auth: true,
+  });
+  return data;
+}
+
+export async function apiAdminUpdateRoleRequest(
+  id: number,
+  payload: { email: string; full_name?: string | null; role_requested: string },
+) {
+  await apiFetch("/admin/requests/" + id, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+    auth: true,
+  });
+}
+
 export async function apiAdminCreateDepartment(payload: { name: string; description?: string }) {
   const data = await apiFetch<{ department: any }>("/admin/departments", {
     method: "POST",

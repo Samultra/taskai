@@ -26,6 +26,9 @@ import {
   apiAdminBlockUser,
   apiAdminUpdateUserName,
   apiAdminHandleRequest,
+  apiAdminCreateUser,
+  apiAdminCreateRoleRequest,
+  apiAdminUpdateRoleRequest,
   apiAdminCreateDepartment,
   apiAdminUpdateDepartment,
   apiAdminDeleteDepartment,
@@ -120,6 +123,20 @@ const AdminDashboard = () => {
   const [deptDeleteId, setDeptDeleteId] = useState<number | null>(null);
   const [projectDeleteId, setProjectDeleteId] = useState<number | null>(null);
 
+  // Users: create form (creates profile + optional role request)
+  const [newUserEmail, setNewUserEmail] = useState("");
+  const [newUserFullName, setNewUserFullName] = useState("");
+  const [newUserPassword, setNewUserPassword] = useState("");
+  const [newUserRequestedRole, setNewUserRequestedRole] = useState<AppRole>("user");
+
+  // Role requests: create + per-row drafts
+  const [newRequestEmail, setNewRequestEmail] = useState("");
+  const [newRequestFullName, setNewRequestFullName] = useState("");
+  const [newRequestRoleRequested, setNewRequestRoleRequested] = useState<AppRole>("moderator");
+  const [requestDrafts, setRequestDrafts] = useState<
+    Record<number, { email: string; full_name: string; role_requested: AppRole }>
+  >({});
+
   useEffect(() => {
     setDeptDrafts(
       Object.fromEntries(
@@ -127,6 +144,14 @@ const AdminDashboard = () => {
       ),
     );
   }, [departments]);
+
+  useEffect(() => {
+    setRequestDrafts(
+      Object.fromEntries(
+        requests.map((r) => [r.id, { email: r.email, full_name: r.full_name ?? "", role_requested: r.role_requested }]),
+      ),
+    );
+  }, [requests]);
 
   const loadData = async () => {
     setLoading(true);
@@ -219,6 +244,72 @@ const AdminDashboard = () => {
       loadData();
     } catch (error: any) {
       toast({ title: "Ошибка сохранения имени", description: error?.message ?? "Не удалось сохранить имя", variant: "destructive" });
+    }
+  };
+
+  const handleCreateUser = async () => {
+    try {
+      if (!newUserEmail.trim() || !newUserPassword.trim()) {
+        toast({ title: "Заполните email и пароль", variant: "destructive" });
+        return;
+      }
+
+      await apiAdminCreateUser({
+        email: newUserEmail.trim(),
+        password: newUserPassword,
+        full_name: newUserFullName.trim() || null,
+        requestedRole: newUserRequestedRole,
+      });
+
+      toast({ title: "Пользователь создан" });
+      setNewUserEmail("");
+      setNewUserFullName("");
+      setNewUserPassword("");
+      setNewUserRequestedRole("user");
+      loadData();
+    } catch (error: any) {
+      toast({ title: "Ошибка создания пользователя", description: error?.message ?? "Не удалось создать пользователя", variant: "destructive" });
+    }
+  };
+
+  const handleCreateRoleRequest = async () => {
+    try {
+      if (!newRequestEmail.trim()) {
+        toast({ title: "Заполните email", variant: "destructive" });
+        return;
+      }
+
+      await apiAdminCreateRoleRequest({
+        email: newRequestEmail.trim(),
+        full_name: newRequestFullName.trim() || null,
+        role_requested: newRequestRoleRequested,
+      });
+
+      toast({ title: "Заявка создана" });
+      setNewRequestEmail("");
+      setNewRequestFullName("");
+      setNewRequestRoleRequested("moderator");
+      loadData();
+    } catch (error: any) {
+      toast({ title: "Ошибка создания заявки", description: error?.message ?? "Не удалось создать заявку", variant: "destructive" });
+    }
+  };
+
+  const handleUpdateRoleRequest = async (requestId: number) => {
+    try {
+      const draft = requestDrafts[requestId];
+      if (!draft) return;
+
+      await apiAdminUpdateRoleRequest(requestId, {
+        email: draft.email.trim(),
+        full_name: draft.full_name.trim() || null,
+        role_requested: draft.role_requested,
+      });
+
+      toast({ title: "Заявка обновлена" });
+      loadData();
+    } catch (error: any) {
+      toast({ title: "Ошибка сохранения заявки", description: error?.message ?? "Не удалось обновить заявку", variant: "destructive" });
     }
   };
 
@@ -466,6 +557,51 @@ const AdminDashboard = () => {
                 <h2 className="text-2xl font-semibold">Пользователи</h2>
                 <Badge variant="outline" className="text-base px-4 py-1.5">{users.length}</Badge>
               </div>
+              <div className="border-b pb-4 space-y-3">
+                <h3 className="text-lg font-semibold">Добавить пользователя</h3>
+                <div className="flex flex-wrap gap-3 items-end">
+                  <div className="flex-1 min-w-[220px]">
+                    <Input
+                      className="h-9 text-base"
+                      placeholder="Email"
+                      value={newUserEmail}
+                      onChange={(e) => setNewUserEmail(e.target.value)}
+                    />
+                  </div>
+                  <div className="flex-1 min-w-[220px]">
+                    <Input
+                      className="h-9 text-base"
+                      placeholder="Имя (опционально)"
+                      value={newUserFullName}
+                      onChange={(e) => setNewUserFullName(e.target.value)}
+                    />
+                  </div>
+                  <div className="flex-1 min-w-[220px]">
+                    <Input
+                      className="h-9 text-base"
+                      placeholder="Пароль"
+                      type="password"
+                      value={newUserPassword}
+                      onChange={(e) => setNewUserPassword(e.target.value)}
+                    />
+                  </div>
+                  <div className="min-w-[200px]">
+                    <Select value={newUserRequestedRole} onValueChange={(v: AppRole) => setNewUserRequestedRole(v)}>
+                      <SelectTrigger className="w-[200px] h-9 text-base">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="user">user</SelectItem>
+                        <SelectItem value="moderator">moderator</SelectItem>
+                        <SelectItem value="admin">admin</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Button onClick={handleCreateUser} disabled={!newUserEmail.trim() || !newUserPassword.trim()} className="h-9 px-4">
+                    Создать
+                  </Button>
+                </div>
+              </div>
               <div className="overflow-auto pr-1 text-base">
                 <Table>
                   <TableHeader>
@@ -567,6 +703,41 @@ const AdminDashboard = () => {
                 <h2 className="text-2xl font-semibold">Заявки на роли</h2>
                 <Badge variant="outline" className="text-base px-4 py-1.5">{requests.length}</Badge>
               </div>
+              <div className="border-b pb-4 space-y-3">
+                <h3 className="text-lg font-semibold">Добавить заявку</h3>
+                <div className="flex flex-wrap gap-3 items-end">
+                  <div className="flex-1 min-w-[220px]">
+                    <Input
+                      className="h-9 text-base"
+                      placeholder="Email"
+                      value={newRequestEmail}
+                      onChange={(e) => setNewRequestEmail(e.target.value)}
+                    />
+                  </div>
+                  <div className="flex-1 min-w-[220px]">
+                    <Input
+                      className="h-9 text-base"
+                      placeholder="Имя (опционально)"
+                      value={newRequestFullName}
+                      onChange={(e) => setNewRequestFullName(e.target.value)}
+                    />
+                  </div>
+                  <div className="min-w-[200px]">
+                    <Select value={newRequestRoleRequested} onValueChange={(v: AppRole) => setNewRequestRoleRequested(v)}>
+                      <SelectTrigger className="w-[200px] h-9 text-base">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="moderator">moderator</SelectItem>
+                        <SelectItem value="admin">admin</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Button onClick={handleCreateRoleRequest} disabled={!newRequestEmail.trim()} className="h-9 px-4">
+                    Создать
+                  </Button>
+                </div>
+              </div>
               <div className="overflow-auto pr-1 text-base">
                 <Table>
                   <TableHeader>
@@ -579,37 +750,90 @@ const AdminDashboard = () => {
                     </TableRow>
                   </TableHeader>
                   <TableBody className="[&>tr>td]:py-3">
-                    {requests.map((r) => (
-                      <TableRow key={r.id}>
-                        <TableCell>{r.email}</TableCell>
-                        <TableCell>{r.full_name ?? "—"}</TableCell>
-                        <TableCell>
-                          <Badge>{r.role_requested}</Badge>
-                        </TableCell>
-                        <TableCell>
-                          {new Date(r.created_at).toLocaleString("ru-RU")}
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex gap-2 justify-end">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => handleRequest(r.id, "approve", r.role_requested, r.email)}
+                    {requests.map((r) => {
+                      const draft = requestDrafts[r.id] ?? {
+                        email: r.email,
+                        full_name: r.full_name ?? "",
+                        role_requested: r.role_requested,
+                      };
+
+                      return (
+                        <TableRow key={r.id}>
+                          <TableCell>
+                            <Input
+                              className="h-9 text-base"
+                              value={draft.email}
+                              onChange={(e) => {
+                                const email = e.target.value;
+                                setRequestDrafts((prev) => ({
+                                  ...prev,
+                                  [r.id]: { ...draft, email },
+                                }));
+                              }}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Input
+                              className="h-9 text-base"
+                              value={draft.full_name}
+                              onChange={(e) => {
+                                const full_name = e.target.value;
+                                setRequestDrafts((prev) => ({
+                                  ...prev,
+                                  [r.id]: { ...draft, full_name },
+                                }));
+                              }}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Select
+                              value={draft.role_requested}
+                              onValueChange={(v: AppRole) =>
+                                setRequestDrafts((prev) => ({
+                                  ...prev,
+                                  [r.id]: { ...draft, role_requested: v },
+                                }))
+                              }
                             >
-                              Одобрить
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="text-destructive border-destructive/50"
-                              onClick={() => handleRequest(r.id, "reject", r.role_requested, r.email)}
-                            >
-                              Отклонить
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                              <SelectTrigger className="w-[160px] h-9 text-base">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="moderator">moderator</SelectItem>
+                                <SelectItem value="admin">admin</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </TableCell>
+                          <TableCell>{new Date(r.created_at).toLocaleString("ru-RU")}</TableCell>
+                          <TableCell>
+                            <div className="flex flex-wrap gap-2 justify-end">
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                onClick={() => handleUpdateRoleRequest(r.id)}
+                              >
+                                Сохранить
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleRequest(r.id, "approve", draft.role_requested, draft.email)}
+                              >
+                                Одобрить
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="text-destructive border-destructive/50"
+                                onClick={() => handleRequest(r.id, "reject", draft.role_requested, draft.email)}
+                              >
+                                Отклонить
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
                     {requests.length === 0 && (
                       <TableRow>
                         <TableCell colSpan={5} className="text-base text-muted-foreground text-center py-6">

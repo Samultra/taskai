@@ -1,6 +1,7 @@
 import express from "express";
 import { authMiddleware } from "./auth.js";
 import { query } from "./db.js";
+import bcrypt from "bcryptjs";
 
 const router = express.Router();
 
@@ -11,6 +12,19 @@ function requireAdmin(req, res, next) {
     return res.status(403).json({ error: "Admin only" });
   }
   next();
+}
+
+const ALLOWED_ROLES = ["user", "moderator", "admin"];
+
+function normalizeOptionalString(v) {
+  if (v === undefined) return null;
+  const s = String(v).trim();
+  return s.length ? s : null;
+}
+
+function assertRole(role) {
+  if (!role || !ALLOWED_ROLES.includes(role)) return false;
+  return true;
 }
 
 router.get("/overview", requireAdmin, async (_req, res) => {
@@ -54,6 +68,156 @@ router.get("/overview", requireAdmin, async (_req, res) => {
     });
   } catch (err) {
     console.error("Admin overview error", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Админ: создать пользователя (+ опционально создать заявку на повышенную роль)
+router.post("/users", requireAdmin, async (req, res) => {
+  try {
+    const { email, password, full_name, requestedRole } = req.body || {};
+    if (!email || !password) {
+      return res.status(400).json({ error: "email and password are required" });
+    }
+
+    const roleReq = requestedRole ?? "user";
+    if (!assertRole(roleReq)) {
+      return res.status(400).json({ error: "invalid requestedRole" });
+    }
+
+    const fullNameNorm = normalizeOptionalString(full_name);
+
+    const existing = await query("SELECT id FROM profiles WHERE email = $1", [email]);
+    if (existing.rowCount > 0) {
+      return res.status(400).json({ error: "User with this email already exists" });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10);
+
+    const result = await query(
+      `INSERT INTO profiles (email, full_name, role, is_blocked, password_hash)
+       VALUES ($1, $2, 'user', false, $3)
+       RETURNING id, email, full_name, role, is_blocked, created_at`,
+      [email, fullNameNorm, passwordHash],
+    );
+
+    let requestId = null;
+    if (roleReq !== "user") {
+      // Если есть такая же pending-заявка — просто обновим full_name.
+      const existingReq = await query(
+        `SELECT id FROM registration_requests
+         WHERE email = $1 AND role_requested = $2 AND status = 'pending'`,
+        [email, roleReq],
+      );
+
+      if (existingReq.rowCount > 0) {
+        requestId = existingReq.rows[0].id;
+        await query(`UPDATE registration_requests SET full_name = $1 WHERE id = $2`, [fullNameNorm, requestId]);
+      } else {
+        const ins = await query(
+          `INSERT INTO registration_requests (email, full_name, role_requested, status)
+           VALUES ($1, $2, $3, 'pending')
+           RETURNING id`,
+          [email, fullNameNorm, roleReq],
+        );
+        requestId = ins.rows[0]?.id ?? null;
+      }
+    }
+
+    await query(
+      `INSERT INTO activity_logs (actor_id, actor_email, action, target_type, target_id, details)
+       VALUES ($1, $2, 'admin_create_user', 'user', $3::text, $4::jsonb)`,
+      [req.user.id, req.user.email, result.rows[0].id, JSON.stringify({ requested_role: roleReq, request_id: requestId })],
+    );
+
+    return res.status(201).json({ profile: result.rows[0], request_id: requestId });
+  } catch (err) {
+    console.error("Admin create user error", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Админ: создать заявку на роль (pending)
+router.post("/requests", requireAdmin, async (req, res) => {
+  try {
+    const { email, full_name, role_requested } = req.body || {};
+    if (!email || !role_requested) {
+      return res.status(400).json({ error: "email and role_requested are required" });
+    }
+    if (!assertRole(role_requested) || role_requested === "user") {
+      return res.status(400).json({ error: "role_requested must be moderator/admin" });
+    }
+
+    const fullNameNorm = normalizeOptionalString(full_name);
+
+    const existingReq = await query(
+      `SELECT id FROM registration_requests
+       WHERE email = $1 AND role_requested = $2 AND status = 'pending'`,
+      [email, role_requested],
+    );
+
+    let requestId = null;
+    if (existingReq.rowCount > 0) {
+      requestId = existingReq.rows[0].id;
+      await query(`UPDATE registration_requests SET full_name = $1 WHERE id = $2`, [fullNameNorm, requestId]);
+    } else {
+      const ins = await query(
+        `INSERT INTO registration_requests (email, full_name, role_requested, status)
+         VALUES ($1, $2, $3, 'pending')
+         RETURNING id`,
+        [email, fullNameNorm, role_requested],
+      );
+      requestId = ins.rows[0]?.id ?? null;
+    }
+
+    await query(
+      `INSERT INTO activity_logs (actor_id, actor_email, action, target_type, target_id, details)
+       VALUES ($1, $2, 'admin_create_role_request', 'registration_request', $3::text, $4::jsonb)`,
+      [req.user.id, req.user.email, requestId, JSON.stringify({ email, role_requested })],
+    );
+
+    res.status(201).json({ ok: true, id: requestId });
+  } catch (err) {
+    console.error("Admin create request error", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Админ: редактировать заявку на роль (только pending)
+router.put("/requests/:id", requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { email, full_name, role_requested } = req.body || {};
+    if (!email || !role_requested) {
+      return res.status(400).json({ error: "email and role_requested are required" });
+    }
+    if (!assertRole(role_requested) || role_requested === "user") {
+      return res.status(400).json({ error: "role_requested must be moderator/admin" });
+    }
+
+    const fullNameNorm = normalizeOptionalString(full_name);
+
+    const updated = await query(
+      `UPDATE registration_requests
+       SET email = $1, full_name = $2, role_requested = $3
+       WHERE id = $4 AND status = 'pending'
+       RETURNING id`,
+      [email, fullNameNorm, role_requested, id],
+    );
+
+    if (updated.rowCount === 0) {
+      return res.status(404).json({ error: "Pending request not found" });
+    }
+
+    await query(
+      `INSERT INTO activity_logs (actor_id, actor_email, action, target_type, target_id, details)
+       VALUES ($1, $2, 'admin_update_role_request', 'registration_request', $3::text, $4::jsonb)`,
+      [req.user.id, req.user.email, id, JSON.stringify({ email, role_requested })],
+    );
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Admin update request error", err);
     res.status(500).json({ error: "Internal server error" });
   }
 });
